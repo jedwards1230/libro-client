@@ -90,7 +90,7 @@ export default class LibroFmClient {
 		});
 		const urls = metadata.parts.map((p) => p.url);
 
-		// check if isbn.download.meta.json is already saved
+		// check if book is already downloaded
 		if (!overwrite && this.state.hasBook(book.isbn)) {
 			const shouldOverwrite = await InputHandler.requestOverwrite(book);
 			if (!shouldOverwrite) {
@@ -122,6 +122,14 @@ export default class LibroFmClient {
 			logger.error({ error, fn: "LibroFmClient.downloadBook" });
 			throw new Error("Failed to download books");
 		}
+	}
+
+	/** Get list of books in library that are not downloaded */
+	@LogMethod({ scope, message: "Checking for new books..." })
+	async getNewBooks(): Promise<Audiobook[]> {
+		const library = await this.getLibrary();
+		const newBooks = this.state.findDiff(library);
+		return newBooks;
 	}
 
 	/** Fetches the download URLs for a specific book. */

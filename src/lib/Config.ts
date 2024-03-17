@@ -2,6 +2,9 @@ import fs from "fs";
 import { CONFIG_PATH } from "./Constants";
 import { LogMethod } from "./Logger";
 
+const USERNAME = process.env.LIBROFM_USERNAME;
+const PASSWORD = process.env.LIBROFM_PASSWORD;
+
 const scope = "Config";
 
 /** Configuration for the app */
@@ -11,8 +14,8 @@ export default class Config {
 	authToken: string | undefined;
 
 	constructor(config?: Partial<Config>) {
-		const localConfig = this.load();
-		Object.assign(this, localConfig, config);
+		this.load();
+		Object.assign(this, config);
 	}
 
 	/** Changes the config */
@@ -25,13 +28,23 @@ export default class Config {
 	/** Loads the config from the file system */
 	@LogMethod({ scope })
 	private load(): Config | null {
+		let config: Config | null = null;
 		if (fs.existsSync(CONFIG_PATH)) {
 			const data = fs.readFileSync(CONFIG_PATH, "utf-8");
-			return JSON.parse(data);
+			config = JSON.parse(data);
+			Object.assign(this, config);
 		} else {
 			fs.writeFileSync(CONFIG_PATH, JSON.stringify(this, null, 2));
-			return null;
 		}
+		this.loadEnv();
+		return config;
+	}
+
+	/** Load Environment variables */
+	@LogMethod({ scope })
+	private loadEnv(override = false): void {
+		if (override || !this.username) this.username = USERNAME;
+		if (override || !this.password) this.password = PASSWORD;
 	}
 
 	/** Saves the config to the file system */

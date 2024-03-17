@@ -9,8 +9,8 @@ export default class State {
 	downloadedAudioBooks: StateDataMap = {};
 
 	constructor(state?: Partial<State>) {
-		const localState = this.load();
-		Object.assign(this, localState, state);
+		this.load();
+		Object.assign(this, state);
 	}
 
 	/** Adds a book to the state */
@@ -27,6 +27,18 @@ export default class State {
 		this.save();
 	}
 
+	/** Find the difference between two states */
+	@LogMethod({ scope })
+	findDiff(curr: AudiobookMap): Audiobook[] {
+		const diff: Audiobook[] = [];
+		for (const isbn in curr) {
+			if (!this.hasBook(isbn)) {
+				diff.push(curr[isbn]);
+			}
+		}
+		return diff;
+	}
+
 	/** Check if a book is in the state */
 	@LogMethod({ scope })
 	hasBook(isbn: string) {
@@ -35,14 +47,17 @@ export default class State {
 
 	/** Loads the state from the file system */
 	@LogMethod({ scope })
-	private load(): State | null {
+	private load(): StateDataMap | null {
+		let stateData: StateDataMap | null = null;
 		if (fs.existsSync(STATE_PATH)) {
 			const data = fs.readFileSync(STATE_PATH, "utf-8");
-			return JSON.parse(data);
+			stateData = JSON.parse(data);
+			Object.assign(this, { downloadedAudioBooks: stateData });
 		} else {
 			fs.writeFileSync(STATE_PATH, JSON.stringify(this, null, 2));
-			return null;
 		}
+
+		return stateData;
 	}
 
 	/** Saves the state to the file system */

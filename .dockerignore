@@ -1,0 +1,7 @@
+/config
+/downloads
+/logs
+/node_modules
+.env
+.git
+.gitignore

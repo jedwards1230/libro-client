@@ -1,0 +1,12 @@
+version: "3.8"
+services:
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        volumes:
+            - ./config:/usr/src/app/config
+            - ./logs:/usr/src/app/logs
+            - ./downloads:/usr/src/app/downloads
+        env_file:
+            - .env

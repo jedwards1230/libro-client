@@ -4,9 +4,10 @@ import fs from "fs";
 
 import { LOGS_DIR } from "./Constants";
 
-// clear logs dir
 if (fs.existsSync(LOGS_DIR)) {
-	fs.rmdirSync(LOGS_DIR, { recursive: true });
+	fs.readdirSync(LOGS_DIR).forEach((file) => {
+		fs.unlinkSync(path.join(LOGS_DIR, file));
+	});
 }
 
 const logFile = path.join(LOGS_DIR, "silly.log");

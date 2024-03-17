@@ -39,8 +39,8 @@ const Command = yargs(hideBin(process.argv))
 	.command(
 		"get [isbns...]",
 		"Download a book. Optionally provide ISBNs to download specific books.",
-		(yargs) => {
-			return yargs
+		(yargs) =>
+			yargs
 				.positional("isbns", {
 					describe: "ISBN of the book to download",
 					type: "string",
@@ -57,8 +57,12 @@ const Command = yargs(hideBin(process.argv))
 						type: "boolean",
 						default: false,
 					},
-				});
-		},
+					ignoreLocal: {
+						describe: "Ignore local state and download all books",
+						type: "boolean",
+						default: false,
+					},
+				}),
 		async (argv) => {
 			const audiobookLibrary = await client.getLibrary();
 			const selected: Audiobook[] = [];
@@ -66,8 +70,17 @@ const Command = yargs(hideBin(process.argv))
 			// If ISBNs are provided, download those books
 			// Otherwise, prompt the user to select a book
 			if (argv.isbns && argv.isbns.length > 0) {
-				for (const isbn of argv.isbns) {
-					logger.info(`Searching library for ISBN: ${argv.isbn}`);
+				// check if any strings can be separated by a space, then make a new list of isbns
+				const isbnList = argv.isbns.reduce((acc, isbn) => {
+					const split = isbn.split(" ");
+					if (split.length > 1) {
+						return acc.concat(split);
+					}
+					return acc.concat(isbn);
+				}, [] as string[]);
+
+				for (const isbn of isbnList) {
+					logger.info(`Searching library for ISBN: ${isbn}`);
 					const book = audiobookLibrary[isbn];
 					if (book) {
 						selected.push(book);
@@ -107,7 +120,38 @@ const Command = yargs(hideBin(process.argv))
 			}
 		}
 	)
-	.demandCommand(1)
+	.command({
+		command: "check",
+		describe: "Check for new books in library",
+		builder: (yargs) =>
+			yargs.options({
+				json: {
+					describe: "Should output as JSON",
+					type: "boolean",
+					default: false,
+				},
+			}),
+		handler: async (argv) => {
+			const audiobooks = await client.getNewBooks();
+			if (!argv.json) {
+				logger.info(
+					`Found ${audiobooks.length} new audiobooks in library\n`
+				);
+				audiobooks.forEach((ab, i) => {
+					logger.info(`Title: ${ab.title}`);
+					logger.info(`ISBN: ${ab.isbn}`);
+					logger.info(`Duration: ${ab.audiobook_info?.duration}`);
+					logger.info(
+						`Narrators: ${ab.audiobook_info?.narrators?.join(", ")}`
+					);
+					logger.info("");
+				});
+			} else {
+				logger.info(JSON.stringify(audiobooks, null, 2));
+			}
+		},
+	})
+	.demandCommand()
 	.parse();
 
 export default Command;
