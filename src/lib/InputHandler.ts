@@ -1,8 +1,7 @@
 import select from "@inquirer/select";
 import password from "@inquirer/password";
 import input from "@inquirer/input";
-
-import type { Audiobook } from "./LibroFmClient/LibroFmClient";
+import confirm from "@inquirer/confirm";
 
 type Credentials = {
 	username: string;
@@ -28,12 +27,19 @@ export default class InputHandler {
 		audiobooks: Audiobook[]
 	): Promise<string> => {
 		const answer = await select({
-			message: "Select a package manager",
+			message: "Select an audiobook to download",
 			choices: audiobooks.map((ab, idx) => ({
-				name: ab.title,
+				name: `${ab.authors} - ${ab.title} - ${ab.isbn}`,
 				value: ab.isbn,
-				description: ab.isbn,
 			})),
+		});
+
+		return answer;
+	};
+
+	static requestOverwrite = async (book: Audiobook): Promise<boolean> => {
+		const answer = await confirm({
+			message: `${book.title} already exists. Overwrite?`,
 		});
 
 		return answer;
