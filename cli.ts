@@ -1,9 +1,11 @@
+#! /usr/bin/env bun
+
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
 import LibroFmClient from "@/LibroFmClient";
 import InputHandler from "@/lib/InputHandler";
-import logger from "./lib/Logger";
+import logger from "@/lib/Logger";
 
 const SCRIPT_NAME = "libro";
 
@@ -65,25 +67,31 @@ const Command = yargs(hideBin(process.argv))
 				}),
 		async (argv) => {
 			const audiobookLibrary = await client.getLibrary();
-			const selected: Audiobook[] = [];
+			let count = 0;
+
+			const downloadHelper = async (book: Audiobook) => {
+				logger.info(`Downloading: ${book.title}`);
+				const [path, zippedPaths] = await client.downloadBook(
+					book,
+					argv.overwrite,
+					argv.keepZip
+				);
+				if (path) {
+					logger.info(`Downloaded ${book.title}`);
+					count++;
+				} else {
+					logger.info("No new books downloaded");
+				}
+			};
 
 			// If ISBNs are provided, download those books
 			// Otherwise, prompt the user to select a book
 			if (argv.isbns && argv.isbns.length > 0) {
-				// check if any strings can be separated by a space, then make a new list of isbns
-				const isbnList = argv.isbns.reduce((acc, isbn) => {
-					const split = isbn.split(" ");
-					if (split.length > 1) {
-						return acc.concat(split);
-					}
-					return acc.concat(isbn);
-				}, [] as string[]);
-
-				for (const isbn of isbnList) {
+				for (const isbn of argv.isbns) {
 					logger.info(`Searching library for ISBN: ${isbn}`);
 					const book = audiobookLibrary[isbn];
 					if (book) {
-						selected.push(book);
+						downloadHelper(book);
 					} else {
 						logger.error(`No book found with ISBN: ${isbn}`, {
 							fn: "Command.get",
@@ -95,7 +103,14 @@ const Command = yargs(hideBin(process.argv))
 					Object.values(audiobookLibrary)
 				);
 				if (downloadChoice) {
-					selected.push(audiobookLibrary[downloadChoice]);
+					const book = audiobookLibrary[downloadChoice];
+					if (book) {
+						downloadHelper(book);
+					} else {
+						logger.error("Invalid selection", {
+							fn: "Command.get",
+						});
+					}
 				} else {
 					logger.error("Invalid selection", {
 						fn: "Command.get",
@@ -103,21 +118,8 @@ const Command = yargs(hideBin(process.argv))
 				}
 			}
 
-			if (selected.length === 0) throw new Error("No books selected");
-
-			for (const book of selected) {
-				logger.info(`Downloading: ${book.title}`);
-				const [path, zippedPaths] = await client.downloadBook(
-					book,
-					argv.overwrite,
-					argv.keepZip
-				);
-				if (path) {
-					logger.info(`Downloaded ${book.title}`);
-				} else {
-					logger.info("No new books downloaded");
-				}
-			}
+			if (count === 0) throw new Error("No books selected");
+			logger.info(`Downloaded ${count} new books.`);
 		}
 	)
 	.command({

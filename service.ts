@@ -1,10 +1,12 @@
-import { $ } from "bun";
+import LibroFmClient from "@/LibroFmClient";
+
+const client = new LibroFmClient();
+await client.init();
 
 const scanLibrary = async () => {
 	console.log("Checking for new books...");
 	try {
-		const newBooks: Audiobook[] =
-			await $`bun run index.ts check --json=true`.json();
+		const newBooks = await client.getNewBooks();
 
 		if (newBooks.length > 0) {
 			console.log(`Found ${newBooks.length} new books:`);
@@ -22,10 +24,37 @@ const scanLibrary = async () => {
 	}
 };
 
+let overwrite = false;
+let keepZip = false;
 const downloadBooks = async (newBooks: Audiobook[]) => {
 	const isbns = newBooks.map((book: any) => book.isbn);
 	console.log("Downloading new books...");
-	await $`bun run index.ts get ${isbns.join(" ")}`;
+
+	const audiobookLibrary = await client.getLibrary();
+
+	let count = 0;
+	for (const isbn of isbns) {
+		console.log(`Searching library for ISBN: ${isbn}`);
+		const book = audiobookLibrary[isbn];
+		if (book) {
+			console.log(`Downloading: ${book.title}`);
+			const [path, zippedPaths] = await client.downloadBook(
+				book,
+				overwrite,
+				keepZip
+			);
+			if (path) {
+				console.log(`Downloaded ${book.title}`);
+				count++;
+			} else {
+				console.log("No new books downloaded");
+			}
+		} else {
+			console.log(`No book found with ISBN: ${isbn}`);
+		}
+	}
+
+	console.log(`Downloaded ${count} new books.`);
 };
 
 let isRunning = false;
@@ -48,4 +77,4 @@ const runService = async () => {
 };
 
 runService();
-setInterval(runService, 30000);
+setInterval(runService, 10000);
