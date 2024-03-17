@@ -2,6 +2,10 @@
 	"name": "libro-client",
 	"module": "cli.ts",
 	"type": "module",
+	"description": "Library for downloading Libro.fm audiobooks",
+	"author": "justinedwards1230@gmail.com",
+	"repository": "github:jedwards1230/libro-client",
+	"license": "MIT",
 	"bin": {
 		"libro": "cli.ts"
 	},
