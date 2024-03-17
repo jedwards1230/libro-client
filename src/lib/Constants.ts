@@ -7,11 +7,11 @@ const LOGS_DIR = path.join(CURRENT_DIR, "logs");
 
 const DOWNLOAD_DIR = path.join(CURRENT_DIR, "downloads");
 
-const STATE_DIR = path.join(CURRENT_DIR, process.env.CONFIG_DIR || "config");
+const STATE_DIR = path.join(CURRENT_DIR, "config");
 const STATE_FILE = "state.json";
 const STATE_PATH = `${STATE_DIR}/${STATE_FILE}`;
 
-const CONFIG_DIR = path.join(CURRENT_DIR, process.env.CONFIG_DIR || "config");
+const CONFIG_DIR = path.join(CURRENT_DIR, "config");
 const CONFIG_FILE = "config.json";
 const CONFIG_PATH = `${CONFIG_DIR}/${CONFIG_FILE}`;
 
