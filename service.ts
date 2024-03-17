@@ -77,4 +77,4 @@ const runService = async () => {
 };
 
 runService();
-setInterval(runService, 10000);
+setInterval(runService, 30000);
