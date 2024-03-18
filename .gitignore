@@ -1,8 +1,6 @@
 # Based on https://raw.githubusercontent.com/github/gitignore/main/Node.gitignore
 
-config/
-downloads/
-metadata/
+data/
 
 # Logs
 

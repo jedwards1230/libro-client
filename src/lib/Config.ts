@@ -1,5 +1,5 @@
 import fs from "fs";
-import { CONFIG_PATH } from "./Constants";
+import { CONFIG_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
 
 const USERNAME = process.env.LIBROFM_USERNAME;

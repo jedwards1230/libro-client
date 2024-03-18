@@ -4,7 +4,7 @@ import JSZip from "jszip";
 
 import APIHandler from "../APIHandler";
 import logger, { LogMethod } from "./Logger";
-import { DOWNLOAD_DIR } from "./Constants";
+import { DOWNLOAD_DIR } from "./Directories";
 
 const scope = "DownloadClient";
 

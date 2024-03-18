@@ -2,7 +2,7 @@ import { format, transports, createLogger } from "winston";
 import path from "path";
 import fs from "fs";
 
-import { LOGS_DIR } from "./Constants";
+import { LOGS_DIR } from "./Directories";
 
 if (fs.existsSync(LOGS_DIR)) {
 	fs.readdirSync(LOGS_DIR).forEach((file) => {

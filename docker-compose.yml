@@ -5,8 +5,6 @@ services:
             context: .
             dockerfile: Dockerfile
         volumes:
-            - ./config:/usr/src/app/config
-            - ./logs:/usr/src/app/logs
-            - ./downloads:/usr/src/app/downloads
+            - ./data:/usr/src/app/data/
         env_file:
             - .env

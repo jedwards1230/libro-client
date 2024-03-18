@@ -16,7 +16,7 @@
 	},
 	"scripts": {
 		"start": "bun run cli.ts",
-		"compile": "bun build ./cli.ts --compile --minify --sourcemap --outfile libro"
+		"build": "bun build ./cli.ts --compile --minify --sourcemap --outfile libro"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",

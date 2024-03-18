@@ -28,5 +28,6 @@
 			"@/*": ["src/*"]
 		}
 	},
-	"include": ["./**/*"]
+	"include": ["./src/**/*", "./cli.ts", "./service.ts"],
+	"exclude": ["./node_modules/**/*"]
 }

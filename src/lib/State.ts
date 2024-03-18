@@ -1,5 +1,5 @@
 import fs from "fs";
-import { STATE_PATH } from "./Constants";
+import { STATE_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
 
 const scope = "State";
