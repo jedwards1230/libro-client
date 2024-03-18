@@ -1,5 +1,6 @@
 {
 	"name": "libro-client",
+	"version": "0.0.4",
 	"module": "cli.ts",
 	"type": "module",
 	"description": "Library for downloading Libro.fm audiobooks",
@@ -9,13 +10,18 @@
 	"bin": {
 		"libro": "cli.ts"
 	},
+	"exports": {
+		".": "./cli.ts",
+		"./client": "./src/LibroFmClient.ts"
+	},
 	"scripts": {
-		"start": "bun run cli.ts"
+		"start": "bun run cli.ts",
+		"compile": "bun build ./cli.ts --compile --minify --sourcemap --outfile libro"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
 		"@types/yargs": "^17.0.32",
-		"typescript": "^5.0.0"
+		"typescript": "^5.4.2"
 	},
 	"dependencies": {
 		"@inquirer/confirm": "^3.1.0",

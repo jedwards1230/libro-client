@@ -11,12 +11,10 @@ This is a simple command-line tool for interacting with your Libro.fm library. I
 
 ### Installation
 
-To install the tool, you need to have Bun installed. Then, run the following command:
+The CLI can be installed as a global package using npm:
 
 ```bash
-bun install
-bun link
-bun link libro-client
+bun add -g libro-client
 ```
 
 To run the tool, use the following command:
