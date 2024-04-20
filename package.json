@@ -1,6 +1,6 @@
 {
 	"name": "libro-client",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"module": "cli.ts",
 	"type": "module",
 	"description": "Library for downloading Libro.fm audiobooks",
@@ -21,15 +21,15 @@
 	"devDependencies": {
 		"@types/bun": "latest",
 		"@types/yargs": "^17.0.32",
-		"typescript": "^5.4.2"
+		"typescript": "^5.4.5"
 	},
 	"dependencies": {
-		"@inquirer/confirm": "^3.1.0",
-		"@inquirer/input": "^2.1.0",
-		"@inquirer/password": "^2.1.0",
-		"@inquirer/select": "^2.2.0",
+		"@inquirer/confirm": "^3.1.5",
+		"@inquirer/input": "^2.1.5",
+		"@inquirer/password": "^2.1.5",
+		"@inquirer/select": "^2.3.1",
 		"jszip": "^3.10.1",
-		"winston": "^3.12.0",
+		"winston": "^3.13.0",
 		"yargs": "^17.7.2"
 	}
 }

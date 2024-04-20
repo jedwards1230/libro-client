@@ -1,10 +1,13 @@
-version: "3.8"
 services:
-    app:
+    libro-client:
         build:
             context: .
             dockerfile: Dockerfile
         volumes:
-            - ./data:/usr/src/app/data/
+            - data:/app/data/
+            - ${PWD}/downloads:/app/downloads/
         env_file:
             - .env
+
+volumes:
+    data:
