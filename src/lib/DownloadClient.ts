@@ -4,7 +4,7 @@ import JSZip from "jszip";
 
 import APIHandler from "../APIHandler";
 import logger, { LogMethod } from "./Logger";
-import { DOWNLOAD_DIR } from "./Directories";
+import { CACHE_DIR, DOWNLOAD_DIR } from "./Directories";
 
 const scope = "DownloadClient";
 
@@ -17,7 +17,7 @@ export default class DownloadCLient {
 	 * */
 	@LogMethod({ scope, message: "Downloading files..." })
 	static async downloadFiles(
-		bookPath: string,
+		filenamePrefix: string,
 		urls: string[],
 		authToken: string,
 		keepZip = false
@@ -29,17 +29,17 @@ export default class DownloadCLient {
 			keepZip &&
 			(await Promise.all(
 				buffers.map((buffer, idx) =>
-					DownloadCLient.save(buffer, `/${bookPath}-${idx}.zip`)
+					DownloadCLient.save(buffer, `/${filenamePrefix}-${idx}.zip`)
 				)
 			));
 
 		const paths = await Promise.all(
 			buffers.map((buffer, idx) =>
-				DownloadCLient.unzip(buffer, `/${bookPath}-${idx}`)
+				DownloadCLient.unzip(buffer, `/${filenamePrefix}-${idx}`)
 			)
 		);
 
-		const finalPath = path.join(DOWNLOAD_DIR, bookPath);
+		const finalPath = path.join(DOWNLOAD_DIR, filenamePrefix);
 		await DownloadCLient.mergeDirectories(paths, finalPath);
 
 		return [finalPath, zipped_files];
@@ -69,7 +69,7 @@ export default class DownloadCLient {
 	static async save(buffer: ArrayBuffer, filename: string): Promise<string> {
 		const data = new Uint8Array(buffer);
 		try {
-			const outputPath = path.join(DOWNLOAD_DIR, filename);
+			const outputPath = path.join(CACHE_DIR, filename);
 			fs.writeFileSync(outputPath, data);
 			return outputPath;
 		} catch (error) {
@@ -88,7 +88,7 @@ export default class DownloadCLient {
 			const zip = new JSZip();
 
 			const directory = await zip.loadAsync(buffer);
-			const outputPath = path.join(DOWNLOAD_DIR, outputDir);
+			const outputPath = path.join(CACHE_DIR, outputDir);
 
 			if (!fs.existsSync(outputPath)) {
 				fs.mkdirSync(outputPath);

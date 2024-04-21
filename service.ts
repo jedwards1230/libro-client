@@ -27,32 +27,38 @@ const scanLibrary = async () => {
 let overwrite = false;
 let keepZip = false;
 const downloadBooks = async (newBooks: Audiobook[]) => {
-	const isbns = newBooks.map((book: any) => book.isbn);
+	const isbns = newBooks.map((book) => book.isbn);
 	console.log("Downloading new books...");
 
 	const audiobookLibrary = await client.getLibrary();
 
-	let count = 0;
-	for (const isbn of isbns) {
+	const promisedBooks = isbns.map(async (isbn) => {
 		console.log(`Searching library for ISBN: ${isbn}`);
 		const book = audiobookLibrary[isbn];
 		if (book) {
 			console.log(`Downloading: ${book.title}`);
-			const [path, zippedPaths] = await client.downloadBook(
-				book,
-				overwrite,
-				keepZip
-			);
-			if (path) {
-				console.log(`Downloaded ${book.title}`);
-				count++;
-			} else {
-				console.log("No new books downloaded");
+			try {
+				const [path, zippedPaths] = await client.downloadBook(
+					book,
+					overwrite,
+					keepZip
+				);
+				if (path) {
+					console.log(`Downloaded ${book.title}`);
+					return book;
+				} else {
+					console.log("No new books downloaded");
+				}
+			} catch (error) {
+				console.error("An error occurred:", error);
 			}
 		} else {
-			console.log(`No book found with ISBN: ${isbn}`);
+			console.warn(`No book found with ISBN: ${isbn}`);
 		}
-	}
+	});
+
+	const books = await Promise.all(promisedBooks);
+	const count = books.filter((book) => book).length;
 
 	console.log(`Downloaded ${count} new books.`);
 };
@@ -60,7 +66,7 @@ const downloadBooks = async (newBooks: Audiobook[]) => {
 let isRunning = false;
 const runService = async () => {
 	if (isRunning) {
-		console.log("Service is already running. Skipping this iteration.");
+		//console.debug("Service is already running. Skipping this iteration.");
 		return;
 	}
 
@@ -78,3 +84,13 @@ const runService = async () => {
 
 runService();
 setInterval(runService, 30000);
+
+process.on("SIGINT", () => {
+	console.log("Exiting...");
+	process.exit(0);
+});
+
+process.on("unhandledRejection", (error) => {
+	console.error("An unhandled rejection occurred:", error);
+	process.exit(1);
+});

@@ -16,7 +16,9 @@
 	},
 	"scripts": {
 		"start": "bun run cli.ts",
-		"build": "bun build ./cli.ts --compile --minify --sourcemap --outfile libro"
+		"build:cli": "bun build ./cli.ts --compile --minify --sourcemap --outfile libro",
+		"build:docker": "docker build . -t jedwards1230/libro:latest",
+		"push:docker": "docker push jedwards1230/libro:latest"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",

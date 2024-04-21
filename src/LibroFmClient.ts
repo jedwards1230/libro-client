@@ -102,7 +102,7 @@ export default class LibroFmClient {
 		}
 
 		try {
-			const bookPath = `${book.authors}-${book.title}`;
+			const bookPath = `${book.authors}`;
 			const [path, zipped_files] = await DownloadCLient.downloadFiles(
 				bookPath,
 				urls,
