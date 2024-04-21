@@ -51,10 +51,14 @@ export default class DownloadCLient {
 	@LogMethod({ scope, message: "Saving metadata..." })
 	static async saveMetadata(
 		book: Audiobook,
+		fileData: DownloadMetadata,
 		filepath: string
 	): Promise<void> {
 		const metadataPath = path.join(filepath, "metadata.json");
-		fs.writeFileSync(metadataPath, JSON.stringify(book, null, 2));
+		fs.writeFileSync(
+			metadataPath,
+			JSON.stringify({ book, fileData }, null, 2)
+		);
 	}
 
 	/** Downloads a file from a URL and returns the data as a Uint8Array */

@@ -115,7 +115,7 @@ export default class LibroFmClient {
 				keepZip
 			);
 
-			await DownloadCLient.saveMetadata(book, path);
+			await DownloadCLient.saveMetadata(book, metadata, path);
 
 			this.state.addBook({
 				book,
