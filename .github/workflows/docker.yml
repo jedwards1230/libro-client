@@ -9,7 +9,6 @@ on:
 jobs:
     deploy-docker:
         runs-on: ubuntu-latest
-        needs: compile-client
 
         steps:
             - uses: actions/checkout@v4
