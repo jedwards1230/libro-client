@@ -78,7 +78,7 @@ export default class LibroFmClient {
 		book: Audiobook,
 		overwrite: boolean = false,
 		keepZip: boolean = false
-	): Promise<[string, string[] | false]> {
+	): Promise<string> {
 		if (!this.config.authToken) throw new Error("Not logged in");
 		const authToken = this.config.authToken;
 
@@ -97,18 +97,25 @@ export default class LibroFmClient {
 				logger.verbose("Skipping download", {
 					fn: "LibroFmClient.downloadBook",
 				});
-				return ["", false];
+				return "";
 			}
 		}
 
 		try {
-			const bookPath = `${book.authors}`;
+			if (!book.authors) throw new Error("No authors found");
+			const filename =
+				typeof book.authors === "string"
+					? book.authors
+					: book.authors.join(", ");
+
 			const [path, zipped_files] = await DownloadCLient.downloadFiles(
-				bookPath,
+				filename,
 				urls,
 				authToken,
 				keepZip
 			);
+
+			await DownloadCLient.saveMetadata(book, path);
 
 			this.state.addBook({
 				book,
@@ -117,7 +124,7 @@ export default class LibroFmClient {
 				...(zipped_files && { zippedPaths: zipped_files }),
 			});
 
-			return [`./${bookPath}`, zipped_files];
+			return filename;
 		} catch (error) {
 			logger.error({ error, fn: "LibroFmClient.downloadBook" });
 			throw new Error("Failed to download books");

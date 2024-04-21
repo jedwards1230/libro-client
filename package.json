@@ -1,11 +1,13 @@
 {
 	"name": "libro-client",
-	"version": "0.0.5",
+	"version": "0.0.6",
 	"module": "cli.ts",
 	"type": "module",
 	"description": "Library for downloading Libro.fm audiobooks",
 	"author": "justinedwards1230@gmail.com",
-	"repository": "github:jedwards1230/libro-client",
+	"repository": {
+		"url": "git+https://github.com/jedwards1230/libro-client.git"
+	},
 	"license": "MIT",
 	"bin": {
 		"libro": "cli.ts"
@@ -16,8 +18,10 @@
 	},
 	"scripts": {
 		"start": "bun run cli.ts",
+		"service": "bun run service.ts",
 		"build:cli": "bun build ./cli.ts --compile --minify --sourcemap --outfile libro",
 		"build:docker": "docker build . -t jedwards1230/libro:latest",
+		"push:cli": "npm publish",
 		"push:docker": "docker push jedwards1230/libro:latest"
 	},
 	"devDependencies": {

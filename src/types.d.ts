@@ -16,7 +16,7 @@ type StateDataMap = {
 interface Audiobook {
 	isbn: string;
 	title: string;
-	authors?: string[];
+	authors?: string | string[];
 	cover_url?: string;
 	catalog_info?: {
 		bookseller_pick?: boolean;

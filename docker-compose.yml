@@ -1,8 +1,9 @@
 services:
-    libro-client:
+    libro:
         build:
             context: .
             dockerfile: Dockerfile
+        container_name: libro
         develop:
             watch:
                 - action: sync
@@ -13,10 +14,7 @@ services:
                 - action: rebuild
                   path: package.json
         volumes:
-            - data:/app/data/
+            - ./data:/app/data/
             - ${PWD}/downloads:/app/downloads/
         env_file:
             - .env
-
-volumes:
-    data:

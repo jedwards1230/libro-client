@@ -38,12 +38,12 @@ const downloadBooks = async (newBooks: Audiobook[]) => {
 		if (book) {
 			console.log(`Downloading: ${book.title}`);
 			try {
-				const [path, zippedPaths] = await client.downloadBook(
+				const filepath = await client.downloadBook(
 					book,
 					overwrite,
 					keepZip
 				);
-				if (path) {
+				if (filepath) {
 					console.log(`Downloaded ${book.title}`);
 					return book;
 				} else {

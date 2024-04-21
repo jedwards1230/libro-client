@@ -71,12 +71,12 @@ const Command = yargs(hideBin(process.argv))
 
 			const downloadHelper = async (book: Audiobook) => {
 				logger.info(`Downloading: ${book.title}`);
-				const [path, zippedPaths] = await client.downloadBook(
+				const filepath = await client.downloadBook(
 					book,
 					argv.overwrite,
 					argv.keepZip
 				);
-				if (path) {
+				if (filepath) {
 					logger.info(`Downloaded ${book.title}`);
 					count++;
 				} else {

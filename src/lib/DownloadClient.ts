@@ -17,7 +17,7 @@ export default class DownloadCLient {
 	 * */
 	@LogMethod({ scope, message: "Downloading files..." })
 	static async downloadFiles(
-		filenamePrefix: string,
+		filename: string,
 		urls: string[],
 		authToken: string,
 		keepZip = false
@@ -29,20 +29,32 @@ export default class DownloadCLient {
 			keepZip &&
 			(await Promise.all(
 				buffers.map((buffer, idx) =>
-					DownloadCLient.save(buffer, `/${filenamePrefix}-${idx}.zip`)
+					DownloadCLient.save(buffer, `/${filename}-${idx}.zip`)
 				)
 			));
 
 		const paths = await Promise.all(
 			buffers.map((buffer, idx) =>
-				DownloadCLient.unzip(buffer, `/${filenamePrefix}-${idx}`)
+				DownloadCLient.unzip(buffer, `/${filename}-${idx}`)
 			)
 		);
 
-		const finalPath = path.join(DOWNLOAD_DIR, filenamePrefix);
+		const finalPath = path.join(DOWNLOAD_DIR, filename);
 		await DownloadCLient.mergeDirectories(paths, finalPath);
 
 		return [finalPath, zipped_files];
+	}
+
+	/**
+	 * Save Audiobook object as JSON file alongside the downloaded files.
+	 */
+	@LogMethod({ scope, message: "Saving metadata..." })
+	static async saveMetadata(
+		book: Audiobook,
+		filepath: string
+	): Promise<void> {
+		const metadataPath = path.join(filepath, "metadata.json");
+		fs.writeFileSync(metadataPath, JSON.stringify(book, null, 2));
 	}
 
 	/** Downloads a file from a URL and returns the data as a Uint8Array */

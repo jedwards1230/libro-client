@@ -10,7 +10,8 @@ if (fs.existsSync(LOGS_DIR)) {
 	});
 }
 
-const logFile = path.join(LOGS_DIR, "silly.log");
+const sillyLogFile = path.join(LOGS_DIR, "silly.log");
+const debugLogFile = path.join(LOGS_DIR, "debug.log");
 
 const DEBUG_MODE = process.env.DEBUG === "true";
 
@@ -69,8 +70,18 @@ const logger = createLogger({
 				format.timestamp(),
 				getFormat(true)
 			),
-			filename: logFile,
+			filename: sillyLogFile,
 			level: "silly",
+		}),
+		new transports.File({
+			format: format.combine(
+				format.errors({ stack: true }),
+				format.splat(),
+				format.timestamp(),
+				getFormat(true)
+			),
+			filename: debugLogFile,
+			level: "debug",
 		}),
 	],
 });
