@@ -68,9 +68,15 @@ export default class DownloadCLient {
 		authToken: string
 	): Promise<ArrayBuffer> {
 		try {
-			const response = await fetch(url, {
-				headers: APIHandler.getHeaders(authToken),
-			});
+			var opts = {};
+			const parsedUrl = new URL(url);
+			if (parsedUrl.hostname.endsWith("libro.fm")) {
+				opts = {
+					headers: APIHandler.getHeaders(authToken),
+				};
+			}
+
+			const response = await fetch(url, opts);
 			const buffer = await response.arrayBuffer();
 
 			return buffer;
