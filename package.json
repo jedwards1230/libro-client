@@ -19,7 +19,7 @@
 	"scripts": {
 		"start": "bun run cli.ts",
 		"service": "bun run service.ts",
-		"build:cli": "bun build ./cli.ts --compile --minify --sourcemap --outfile libro",
+		"build:cli": "bun build ./cli.ts --compile --minify --sourcemap --outfile bin/libro",
 		"build:docker": "docker build . -t jedwards1230/libro:latest",
 		"push:cli": "npm publish",
 		"push:docker": "docker push jedwards1230/libro:latest"
@@ -30,10 +30,10 @@
 		"typescript": "^5.4.5"
 	},
 	"dependencies": {
-		"@inquirer/confirm": "^3.1.5",
-		"@inquirer/input": "^2.1.5",
-		"@inquirer/password": "^2.1.5",
-		"@inquirer/select": "^2.3.1",
+		"@inquirer/confirm": "^3.1.6",
+		"@inquirer/input": "^2.1.6",
+		"@inquirer/password": "^2.1.6",
+		"@inquirer/select": "^2.3.2",
 		"jszip": "^3.10.1",
 		"winston": "^3.13.0",
 		"yargs": "^17.7.2"
