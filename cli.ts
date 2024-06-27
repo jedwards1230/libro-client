@@ -91,7 +91,7 @@ const Command = yargs(hideBin(process.argv))
 					logger.info(`Searching library for ISBN: ${isbn}`);
 					const book = audiobookLibrary[isbn];
 					if (book) {
-						downloadHelper(book);
+						await downloadHelper(book);
 					} else {
 						logger.error(`No book found with ISBN: ${isbn}`, {
 							fn: "Command.get",
@@ -105,7 +105,7 @@ const Command = yargs(hideBin(process.argv))
 				if (downloadChoice) {
 					const book = audiobookLibrary[downloadChoice];
 					if (book) {
-						downloadHelper(book);
+						await downloadHelper(book);
 					} else {
 						logger.error("Invalid selection", {
 							fn: "Command.get",
