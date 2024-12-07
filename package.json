@@ -1,6 +1,6 @@
 {
 	"name": "libro-client",
-	"version": "0.0.6",
+	"version": "0.0.7",
 	"module": "cli.ts",
 	"type": "module",
 	"description": "Library for downloading Libro.fm audiobooks",

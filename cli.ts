@@ -68,6 +68,7 @@ const Command = yargs(hideBin(process.argv))
 		async (argv) => {
 			const audiobookLibrary = await client.getLibrary();
 			let count = 0;
+			const downloadPromises: Promise<void>[] = [];
 
 			const downloadHelper = async (book: Audiobook) => {
 				logger.info(`Downloading: ${book.title}`);
@@ -91,7 +92,7 @@ const Command = yargs(hideBin(process.argv))
 					logger.info(`Searching library for ISBN: ${isbn}`);
 					const book = audiobookLibrary[isbn];
 					if (book) {
-						downloadHelper(book);
+						downloadPromises.push(downloadHelper(book));
 					} else {
 						logger.error(`No book found with ISBN: ${isbn}`, {
 							fn: "Command.get",
@@ -105,7 +106,7 @@ const Command = yargs(hideBin(process.argv))
 				if (downloadChoice) {
 					const book = audiobookLibrary[downloadChoice];
 					if (book) {
-						downloadHelper(book);
+						downloadPromises.push(downloadHelper(book));
 					} else {
 						logger.error("Invalid selection", {
 							fn: "Command.get",
@@ -118,6 +119,7 @@ const Command = yargs(hideBin(process.argv))
 				}
 			}
 
+			await Promise.all(downloadPromises);
 			if (count === 0) throw new Error("No books selected");
 			logger.info(`Downloaded ${count} new books.`);
 		}
