@@ -1,19 +1,30 @@
 #!/bin/bash
-# Devcontainer entrypoint
-# Runs after the container starts. Installs bun dependencies.
+# Devcontainer entrypoint - runs on every container start.
+# Keep this idempotent (safe to run multiple times).
 
 set -euo pipefail
 
-WORKSPACE="/workspace"
+echo "=== Libro Devcontainer Health Check ==="
 
-echo "[entrypoint] Setting up libro-client devcontainer..."
+# Tool version validation
+check_tool() {
+  local name="$1"
+  local cmd="$2"
+  if version=$($cmd 2>/dev/null); then
+    printf "  %-18s %s\n" "$name" "$version"
+  else
+    printf "  %-18s %s\n" "$name" "NOT FOUND"
+  fi
+}
+
+echo "Tools:"
+check_tool "bun" "bun --version"
+check_tool "node" "node --version"
+check_tool "yq" "yq --version"
+
+echo "=== Health Check Complete ==="
 
 # Install dependencies
-if [ -f "${WORKSPACE}/package.json" ]; then
-  echo "[entrypoint] Installing bun dependencies..."
-  cd "${WORKSPACE}" && bun install
-else
-  echo "[entrypoint] No package.json found — skipping bun install"
+if [ -f package.json ]; then
+  bun install --silent 2>/dev/null || true
 fi
-
-echo "[entrypoint] Devcontainer ready"
