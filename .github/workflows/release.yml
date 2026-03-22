@@ -1,35 +1,46 @@
 # Auto-release on every merge to main.
 # Default: patch bump. Use semver:minor or semver:major PR labels for bigger bumps.
 # Add skip-release label to skip releasing entirely.
-# Also supports manual workflow_dispatch with version override.
+# Also supports manual workflow_dispatch with bump type or version override.
 
 name: Release
 
-run-name: "${{ github.event_name == 'workflow_dispatch' && format('Release v{0}', inputs.version) || 'Auto-release' }}"
+run-name: "${{ inputs.version && format('Release v{0}', inputs.version) || inputs.bump_type && format('Release ({0})', inputs.bump_type) || 'Auto-release' }}"
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
+      bump_type:
+        description: "Bump type"
+        required: false
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
       version:
-        description: "Override version (e.g. 1.0.0) — without the 'v' prefix"
-        required: true
+        description: "Override version (e.g. 1.0.0) — takes precedence over bump type"
+        required: false
         type: string
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  release:
-    name: Tag & Release
+  # Step 1: Compute version and run tests
+  validate:
+    name: Validate & Compute Version
     runs-on: ubuntu-latest
-    # Skip release commits to avoid infinite loop
     if: "!startsWith(github.event.head_commit.message, 'Release v')"
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       skipped: ${{ steps.bump.outputs.skip }}
+      bump_type: ${{ steps.bump.outputs.type || inputs.bump_type || 'override' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,7 +94,7 @@ jobs:
             fi
             NEXT_VERSION="$OVERRIDE"
           else
-            BUMP_TYPE="${{ steps.bump.outputs.type }}"
+            BUMP_TYPE="${{ steps.bump.outputs.type || inputs.bump_type }}"
             LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1 || true)
 
             if [ -z "$LATEST_TAG" ]; then
@@ -129,69 +140,15 @@ jobs:
         if: steps.bump.outputs.skip != 'true'
         run: bun test
 
-      - name: Bump package.json version
-        if: steps.bump.outputs.skip != 'true'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
-
-      - name: Commit version bump and tag
-        if: steps.bump.outputs.skip != 'true'
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "Release ${TAG}" || true
-          git tag -a "$TAG" -m "Release $VERSION"
-          git push origin HEAD:main --follow-tags
-
-      - name: Create GitHub Release
-        if: steps.bump.outputs.skip != 'true'
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | grep -B1 "^${TAG}$" | head -1)
-
-          RELEASE_ARGS=(
-            "$TAG"
-            --title "Release ${{ steps.version.outputs.version }}"
-            --generate-notes
-            --latest
-          )
-
-          # Only add --notes-start-tag if a valid previous tag exists
-          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
-            RELEASE_ARGS+=(--notes-start-tag "$PREV_TAG")
-          fi
-
-          gh release create "${RELEASE_ARGS[@]}"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Summary
-        if: steps.bump.outputs.skip != 'true'
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          echo "## Release $TAG" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Bump Type | ${{ steps.bump.outputs.type || 'override' }} |" >> $GITHUB_STEP_SUMMARY
-
+  # Step 2: Build and push Docker image (before tagging)
   docker:
     name: Build & Push Docker Image
-    needs: release
-    if: needs.release.outputs.skipped != 'true' && needs.release.outputs.tag != ''
+    needs: validate
+    if: needs.validate.outputs.skipped != 'true' && needs.validate.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release.outputs.tag }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -213,11 +170,73 @@ jobs:
           push: true
           tags: |
             jedwards1230/libro:latest
-            jedwards1230/libro:${{ needs.release.outputs.version }}
+            jedwards1230/libro:${{ needs.validate.outputs.version }}
 
       - name: Summary
         run: |
           echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- \`jedwards1230/libro:${{ needs.release.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`jedwards1230/libro:${{ needs.validate.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`jedwards1230/libro:latest\`" >> $GITHUB_STEP_SUMMARY
+
+  # Step 3: Tag, bump package.json, and create GitHub Release (only after Docker succeeds)
+  release:
+    name: Tag & Release
+    needs: [validate, docker]
+    if: needs.validate.outputs.skipped != 'true' && needs.validate.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump package.json version
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+      - name: Commit version bump and tag
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          VERSION="${{ needs.validate.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "Release ${TAG}" || true
+          git tag -a "$TAG" -m "Release $VERSION"
+          git push origin HEAD:main --follow-tags
+
+      - name: Create GitHub Release
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | grep -B1 "^${TAG}$" | head -1)
+
+          RELEASE_ARGS=(
+            "$TAG"
+            --title "Release ${{ needs.validate.outputs.version }}"
+            --generate-notes
+            --latest
+          )
+
+          # Only add --notes-start-tag if a valid previous tag exists
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
+            RELEASE_ARGS+=(--notes-start-tag "$PREV_TAG")
+          fi
+
+          gh release create "${RELEASE_ARGS[@]}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Summary
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          echo "## Release $TAG" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ needs.validate.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bump Type | ${{ needs.validate.outputs.bump_type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker | \`jedwards1230/libro:${{ needs.validate.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
