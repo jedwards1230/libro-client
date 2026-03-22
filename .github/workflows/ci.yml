@@ -1,5 +1,5 @@
 # Runs tests on PRs and pushes to main using Bun's built-in test runner
-name: "CI: ${{ github.event.pull_request.title || github.ref_name }}"
+name: CI
 
 on:
   push:
