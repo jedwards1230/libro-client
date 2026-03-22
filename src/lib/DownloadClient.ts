@@ -127,6 +127,10 @@ export default class DownloadCLient {
 								outputPath,
 								relativePath
 							);
+							const fileDir = path.dirname(filePath);
+							if (!fs.existsSync(fileDir)) {
+								fs.mkdirSync(fileDir, { recursive: true });
+							}
 							fs.writeFileSync(filePath, content);
 						});
 					filePromises.push(filePromise);
@@ -158,25 +162,8 @@ export default class DownloadCLient {
 			}
 
 			for (const dir of src) {
-				const files = fs.readdirSync(dir);
-				for (const file of files) {
-					const srcFile = `${dir}/${file}`;
-					const destFile = `${dest}/${file}`;
-					if (fs.existsSync(srcFile)) {
-						fs.copyFileSync(srcFile, destFile);
-					} else {
-						logger.error(`File ${srcFile} does not exist`, {
-							fn: "LibroFmClient.mergeDirectories",
-						});
-					}
-				}
-
-				// Delete files in the source directory
-				for (const file of files) {
-					fs.unlinkSync(`${dir}/${file}`);
-				}
-				// Delete the source directory
-				fs.rmdirSync(dir);
+				fs.cpSync(dir, dest, { recursive: true });
+				fs.rmSync(dir, { recursive: true, force: true });
 			}
 		} catch (error) {
 			logger.error({ error, fn: "LibroFmClient.mergeDirectories" });

@@ -93,25 +93,12 @@ describe("DownloadClient", () => {
 		// Replicate the mergeDirectories logic from DownloadClient
 		function mergeDirectories(src: string[], dest: string): void {
 			if (!fs.existsSync(dest)) {
-				fs.mkdirSync(dest);
+				fs.mkdirSync(dest, { recursive: true });
 			}
 
 			for (const dir of src) {
-				const files = fs.readdirSync(dir);
-				for (const file of files) {
-					const srcFile = `${dir}/${file}`;
-					const destFile = `${dest}/${file}`;
-					if (fs.existsSync(srcFile)) {
-						fs.copyFileSync(srcFile, destFile);
-					}
-				}
-
-				// Delete files in the source directory
-				for (const file of files) {
-					fs.unlinkSync(`${dir}/${file}`);
-				}
-				// Delete the source directory
-				fs.rmdirSync(dir);
+				fs.cpSync(dir, dest, { recursive: true });
+				fs.rmSync(dir, { recursive: true, force: true });
 			}
 		}
 
