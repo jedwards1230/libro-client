@@ -1,42 +1,42 @@
 {
-	"name": "libro-client",
-	"version": "0.0.7",
-	"module": "cli.ts",
-	"type": "module",
-	"description": "Library for downloading Libro.fm audiobooks",
-	"author": "justinedwards1230@gmail.com",
-	"repository": {
-		"url": "git+https://github.com/jedwards1230/libro-client.git"
-	},
-	"license": "MIT",
-	"bin": {
-		"libro": "cli.ts"
-	},
-	"exports": {
-		".": "./cli.ts",
-		"./client": "./src/LibroFmClient.ts"
-	},
-	"scripts": {
-		"test": "bun test",
-		"start": "bun run cli.ts",
-		"service": "bun run service.ts",
-		"build:cli": "bun build ./cli.ts --compile --minify --sourcemap --outfile bin/libro",
-		"build:docker": "docker build . -t jedwards1230/libro:latest",
-		"push:cli": "npm publish",
-		"push:docker": "docker push jedwards1230/libro:latest"
-	},
-	"devDependencies": {
-		"@types/bun": "latest",
-		"@types/yargs": "^17.0.32",
-		"typescript": "^5.4.5"
-	},
-	"dependencies": {
-		"@inquirer/confirm": "^3.1.6",
-		"@inquirer/input": "^2.1.6",
-		"@inquirer/password": "^2.1.6",
-		"@inquirer/select": "^2.3.2",
-		"jszip": "^3.10.1",
-		"winston": "^3.13.0",
-		"yargs": "^17.7.2"
-	}
+  "name": "libro-client",
+  "version": "0.0.1",
+  "module": "cli.ts",
+  "type": "module",
+  "description": "Library for downloading Libro.fm audiobooks",
+  "author": "justinedwards1230@gmail.com",
+  "repository": {
+    "url": "git+https://github.com/jedwards1230/libro-client.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "libro": "cli.ts"
+  },
+  "exports": {
+    ".": "./cli.ts",
+    "./client": "./src/LibroFmClient.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "start": "bun run cli.ts",
+    "service": "bun run service.ts",
+    "build:cli": "bun build ./cli.ts --compile --minify --sourcemap --outfile bin/libro",
+    "build:docker": "docker build . -t jedwards1230/libro:latest",
+    "push:cli": "npm publish",
+    "push:docker": "docker push jedwards1230/libro:latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/yargs": "^17.0.32",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@inquirer/confirm": "^3.1.6",
+    "@inquirer/input": "^2.1.6",
+    "@inquirer/password": "^2.1.6",
+    "@inquirer/select": "^2.3.2",
+    "jszip": "^3.10.1",
+    "winston": "^3.13.0",
+    "yargs": "^17.7.2"
+  }
 }
