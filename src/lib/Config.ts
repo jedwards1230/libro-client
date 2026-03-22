@@ -4,6 +4,7 @@ import { LogMethod } from "./Logger";
 
 const USERNAME = process.env.LIBROFM_USERNAME;
 const PASSWORD = process.env.LIBROFM_PASSWORD;
+const DOWNLOAD_DIR = process.env.LIBROFM_DOWNLOAD_DIR;
 
 const scope = "Config";
 
@@ -12,6 +13,7 @@ export default class Config {
 	username: string | undefined;
 	password: string | undefined;
 	authToken: string | undefined;
+	downloadDir: string | undefined;
 
 	constructor(config?: Partial<Config>) {
 		this.load();
@@ -45,6 +47,7 @@ export default class Config {
 	private loadEnv(override = false): void {
 		if (override || !this.username) this.username = USERNAME;
 		if (override || !this.password) this.password = PASSWORD;
+		if (override || !this.downloadDir) this.downloadDir = DOWNLOAD_DIR;
 	}
 
 	/** Saves the config to the file system */

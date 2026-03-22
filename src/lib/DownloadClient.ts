@@ -20,7 +20,8 @@ export default class DownloadCLient {
 		filename: string,
 		urls: string[],
 		authToken: string,
-		keepZip = false
+		keepZip = false,
+		directory?: string,
 	): Promise<[string, string[] | false]> {
 		const buffers = await Promise.all(
 			urls.map((url) => DownloadCLient.download(url, authToken))
@@ -39,7 +40,7 @@ export default class DownloadCLient {
 			)
 		);
 
-		const finalPath = path.join(DOWNLOAD_DIR, filename);
+		const finalPath = path.join(directory || DOWNLOAD_DIR, filename);
 		await DownloadCLient.mergeDirectories(paths, finalPath);
 
 		return [finalPath, zipped_files];
@@ -113,7 +114,7 @@ export default class DownloadCLient {
 			const outputPath = path.join(CACHE_DIR, outputDir);
 
 			if (!fs.existsSync(outputPath)) {
-				fs.mkdirSync(outputPath);
+				fs.mkdirSync(outputPath, { recursive: true });
 			}
 
 			const filePromises: Promise<void>[] = [];
@@ -153,7 +154,7 @@ export default class DownloadCLient {
 		});
 		try {
 			if (!fs.existsSync(dest)) {
-				fs.mkdirSync(dest);
+				fs.mkdirSync(dest, { recursive: true });
 			}
 
 			for (const dir of src) {

@@ -29,6 +29,14 @@ export default class LibroFmClient {
 			}
 			await this.login(this.config.username, this.config.password);
 		}
+		if (!this.config.downloadDir) {
+			const downloadDir = await InputHandler.requestDownloadLocation();
+			this.config.change({ downloadDir });
+
+			if (!this.config.downloadDir) {
+				throw new Error("Download directory not provided");
+			}
+		}
 	}
 
 	/** Logs in to the Libro.fm API and saves the authToken in the config. */
@@ -103,16 +111,28 @@ export default class LibroFmClient {
 
 		try {
 			if (!book.authors) throw new Error("No authors found");
-			const filename =
+			const authors =
 				typeof book.authors === "string"
 					? book.authors
 					: book.authors.join(", ");
+
+			const series =
+				typeof book.series === "string" ? book.series : null;
+
+			const title = [book.series_num, book.title]
+				.filter(Boolean)
+				.join(" - ");
+
+			const filename = [authors, series, title]
+				.filter(Boolean)
+				.join("/");
 
 			const [path, zipped_files] = await DownloadCLient.downloadFiles(
 				filename,
 				urls,
 				authToken,
-				keepZip
+				keepZip,
+				this.config.downloadDir
 			);
 
 			await DownloadCLient.saveMetadata(book, metadata, path);

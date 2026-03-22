@@ -22,6 +22,13 @@ export default class InputHandler {
 		return { username, password: pass };
 	};
 
+	static requestDownloadLocation = async (): Promise<string> => {
+		const location = await input({
+			message: "Enter the full path to your download location",
+		});
+		return location;
+	};
+
 	/** Requests the user to select a book to download */
 	static requestDownloadChoice = async (
 		audiobooks: Audiobook[]
