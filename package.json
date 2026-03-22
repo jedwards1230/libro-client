@@ -17,6 +17,7 @@
 		"./client": "./src/LibroFmClient.ts"
 	},
 	"scripts": {
+		"test": "bun test",
 		"start": "bun run cli.ts",
 		"service": "bun run service.ts",
 		"build:cli": "bun build ./cli.ts --compile --minify --sourcemap --outfile bin/libro",
