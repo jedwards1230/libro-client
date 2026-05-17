@@ -3,26 +3,28 @@ import APIHandler from "../APIHandler";
 
 describe("APIHandler", () => {
 	describe("getHeaders", () => {
-		test("returns Content-Type header without auth token", () => {
+		test("omits Authorization when no auth token is provided", () => {
 			const headers = APIHandler.getHeaders();
 			expect(headers["Content-Type"]).toBe("application/json");
-			expect(headers.Authorization).toBe("Bearer undefined");
+			expect(headers).not.toHaveProperty("Authorization");
 		});
 
-		test("returns Content-Type and Authorization with auth token", () => {
+		test("includes Authorization when auth token is provided", () => {
 			const headers = APIHandler.getHeaders("test-token");
 			expect(headers["Content-Type"]).toBe("application/json");
 			expect(headers.Authorization).toBe("Bearer test-token");
 		});
 
-		test("includes User-Agent when auth token is provided", () => {
-			const headers = APIHandler.getHeaders("test-token");
-			expect(headers["User-Agent"]).toBe("okhttp/3.14.9");
-		});
+		test("always includes User-Agent and X-LibroFm-AppVer", () => {
+			// /oauth/token returns 401 at the ELB without these headers,
+			// so they must be sent on unauthed requests too.
+			const unauthed = APIHandler.getHeaders();
+			expect(unauthed["User-Agent"]).toBe("okhttp/5.3.2");
+			expect(unauthed["X-LibroFm-AppVer"]).toBe("7.34.8");
 
-		test("omits User-Agent when no auth token is provided", () => {
-			const headers = APIHandler.getHeaders();
-			expect(headers).not.toHaveProperty("User-Agent");
+			const authed = APIHandler.getHeaders("test-token");
+			expect(authed["User-Agent"]).toBe("okhttp/5.3.2");
+			expect(authed["X-LibroFm-AppVer"]).toBe("7.34.8");
 		});
 	});
 
