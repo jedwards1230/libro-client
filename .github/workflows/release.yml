@@ -1,14 +1,21 @@
 # Auto-tag + release on push to main.
 #
 # Reads the merged PR's `semver:*` label (defaults to patch, `skip-release`
-# opts out), then delegates tag creation and AI release notes to the shared
-# jedwards1230/release-workflows/ai-release.yml workflow. Builds + pushes
-# the multi-arch Docker image to Docker Hub from the tag ref, then creates
-# the GitHub Release with the Docker pull snippet prepended to the AI body.
+# opts out), computes the next version, generates AI release notes (Haiku
+# for patch, Sonnet for minor/major; falls back to GitHub's native
+# generate_release_notes when ANTHROPIC_API_KEY is absent), tags, builds +
+# pushes the multi-arch Docker image, and creates the GitHub Release with
+# install snippets prepended to the AI body.
+#
+# This is a self-contained version of the
+# `jedwards1230/release-workflows/.github/workflows/ai-release.yml@v0`
+# reusable workflow. Inlined here because release-workflows is a private
+# repo and reusable workflows can't be called across the public/private
+# boundary — libro-client is public. If release-workflows ever flips
+# public, this can be slimmed back down to a thin caller of @v0.
 #
 # Publishing to npm is handled by a separate `publish-npm.yml` workflow
-# that triggers off the GitHub Release event — per-repo distribution
-# concerns live in this repo, not in ai-release.yml.
+# that triggers off the GitHub Release event.
 
 name: Release
 
@@ -66,7 +73,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # workflow_dispatch: use provided inputs verbatim.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             {
               echo "type=${{ inputs.bump_type }}"
@@ -125,14 +131,290 @@ jobs:
     name: Tag & Generate Notes
     needs: [detect]
     if: needs.detect.outputs.skip != 'true'
-    uses: jedwards1230/release-workflows/.github/workflows/ai-release.yml@v0
-    with:
-      service_name: libro-client
-      service_description: "a Bun-based CLI and background service for downloading audiobooks from Libro.fm"
-      bump_type: ${{ needs.detect.outputs.bump_type }}
-      dry_run: ${{ needs.detect.outputs.dry_run == 'true' }}
-    secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      release_body: ${{ steps.body.outputs.release_body }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        env:
+          BUMP_TYPE_IN: ${{ needs.detect.outputs.bump_type }}
+          DRY_RUN: ${{ needs.detect.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1 || true)
+          if [ -z "$LATEST_TAG" ]; then
+            PREV_REF=$(git rev-list --max-parents=0 HEAD)
+            MAJOR=0; MINOR=0; PATCH=0
+            echo "No existing semver tags found, starting from 0.0.0"
+          else
+            PREV_REF="$LATEST_TAG"
+            LATEST_VERSION="${LATEST_TAG#v}"
+            MAJOR=$(echo "$LATEST_VERSION" | cut -d. -f1)
+            MINOR=$(echo "$LATEST_VERSION" | cut -d. -f2)
+            PATCH=$(echo "$LATEST_VERSION" | cut -d. -f3)
+            echo "Latest tag: $LATEST_TAG"
+          fi
+
+          case "$BUMP_TYPE_IN" in
+            major) NEXT_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEXT_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+            patch) NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+            *) echo "::error::Invalid bump_type '$BUMP_TYPE_IN'"; exit 1 ;;
+          esac
+
+          NEXT_TAG="v${NEXT_VERSION}"
+
+          if git rev-parse "$NEXT_TAG" >/dev/null 2>&1; then
+            if [ "$DRY_RUN" = "true" ]; then
+              PREV_REF=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | grep -B1 "^${NEXT_TAG}$" | head -1)
+              [ "$PREV_REF" = "$NEXT_TAG" ] && PREV_REF=$(git rev-list --max-parents=0 HEAD)
+              echo "Replay mode: diff range ${PREV_REF}..${NEXT_TAG}"
+            else
+              echo "::error::Tag $NEXT_TAG already exists"
+              exit 1
+            fi
+          fi
+
+          # Cumulative diff for minor/major: diff from the previous X.Y.0 / X.0.0
+          # tag rather than the immediate predecessor, so notes summarize the
+          # full arc of the release rather than just the last patch.
+          CHANGELOG_REF="$PREV_REF"
+          case "$BUMP_TYPE_IN" in
+            minor)
+              MINOR_BASE_TAG="v${MAJOR}.${MINOR}.0"
+              git rev-parse "$MINOR_BASE_TAG" >/dev/null 2>&1 && CHANGELOG_REF="$MINOR_BASE_TAG"
+              ;;
+            major)
+              MAJOR_BASE_TAG="v${MAJOR}.0.0"
+              git rev-parse "$MAJOR_BASE_TAG" >/dev/null 2>&1 && CHANGELOG_REF="$MAJOR_BASE_TAG"
+              ;;
+          esac
+
+          {
+            echo "version=${NEXT_VERSION}"
+            echo "tag=${NEXT_TAG}"
+            echo "prev_tag=${PREV_REF}"
+            echo "changelog_ref=${CHANGELOG_REF}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT_VERSION (tag: $NEXT_TAG)"
+          echo "Changelog range: $CHANGELOG_REF..$NEXT_TAG"
+
+      - name: Create and push tag
+        if: needs.detect.outputs.dry_run != 'true'
+        env:
+          NEXT_TAG: ${{ steps.version.outputs.tag }}
+          NEXT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEXT_TAG" -m "Release ${NEXT_VERSION}"
+          git push origin "$NEXT_TAG"
+
+      - name: Collect release context
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          CHANGELOG_REF: ${{ steps.version.outputs.changelog_ref }}
+          RELEASE_BRANCH: main
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          DIFF_TARGET="$TAG"
+          git rev-parse "$TAG" >/dev/null 2>&1 || DIFF_TARGET="HEAD"
+
+          # Merge commits only — excludes direct-to-main pushes.
+          git log --merges --pretty=format:"- %s (%h)" "${CHANGELOG_REF}..${DIFF_TARGET}" > /tmp/commits.txt
+          echo "" >> /tmp/commits.txt
+
+          # PR list scoped to the diff window.
+          PREV_DATE=$(TZ=UTC git log -1 --date=iso-strict-local --format="%cd" "${CHANGELOG_REF}")
+          if gh pr list --state merged --base "$RELEASE_BRANCH" \
+              --search "merged:>${PREV_DATE}" \
+              --json number,title,author \
+              --jq '.[] | "- #\(.number) \(.title) (@\(.author.login))"' \
+              > /tmp/prs.txt; then
+            [ -s /tmp/prs.txt ] || echo "(no PRs merged in this range)" > /tmp/prs.txt
+          else
+            echo "::warning::gh pr list failed; release notes will lack PR context"
+            echo "(PR list unavailable)" > /tmp/prs.txt
+          fi
+
+          # Diff stats + full diff scoped to merge-touched files.
+          git log --merges --name-only -z --pretty=format:"" "${CHANGELOG_REF}..${DIFF_TARGET}" \
+            | tr '\0\n' '\n\0' | grep -z '.' | sort -zu > /tmp/merge_files.txt || true
+          MERGE_FILES_COUNT=$(tr '\0' '\n' < /tmp/merge_files.txt | grep -c '.' || true)
+
+          if [ "$MERGE_FILES_COUNT" -gt 0 ]; then
+            xargs -0 git diff --stat "${CHANGELOG_REF}..${DIFF_TARGET}" -- < /tmp/merge_files.txt > /tmp/diffstat.txt
+            xargs -0 git diff "${CHANGELOG_REF}..${DIFF_TARGET}" -- < /tmp/merge_files.txt > /tmp/fulldiff.txt
+          else
+            echo "No PR-merged changes in this range" > /tmp/diffstat.txt
+            echo "No PR-merged changes in this range" > /tmp/fulldiff.txt
+          fi
+          truncate -s '<100K' /tmp/fulldiff.txt
+
+          echo "https://github.com/${REPO}/compare/${CHANGELOG_REF}...${TAG}" > /tmp/compare_url.txt
+
+      - name: Check for Anthropic API key
+        id: api_key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "ANTHROPIC_API_KEY not set; will fall back to GitHub's native generate_release_notes"
+          fi
+
+      - name: Select model for release notes
+        id: model
+        env:
+          BUMP_TYPE: ${{ needs.detect.outputs.bump_type }}
+        run: |
+          case "$BUMP_TYPE" in
+            minor|major) echo "model=claude-sonnet-4-6" >> "$GITHUB_OUTPUT" ;;
+            *)           echo "model=claude-haiku-4-5-20251001" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Generate AI release notes
+        id: ai_notes
+        if: steps.api_key.outputs.available == 'true'
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TAG: ${{ steps.version.outputs.tag }}
+          CHANGELOG_REF: ${{ steps.version.outputs.changelog_ref }}
+          BUMP_TYPE: ${{ needs.detect.outputs.bump_type }}
+          MODEL: ${{ steps.model.outputs.model }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -s /tmp/commits.txt ] || [ "$(wc -l < /tmp/commits.txt | tr -d ' ')" -le 1 ]; then
+            echo "No commits in diff range — skipping AI release notes"
+            exit 0
+          fi
+
+          CUMULATIVE_NOTE=""
+          if [ "$BUMP_TYPE" = "minor" ] || [ "$BUMP_TYPE" = "major" ]; then
+            CUMULATIVE_NOTE="This is a ${BUMP_TYPE} release. The diff below shows ALL changes since ${CHANGELOG_REF} (cumulative across all patch releases)."
+          fi
+
+          cat > /tmp/prompt.txt <<PROMPT
+          You are writing release notes for ${TAG} of libro-client (a Bun-based CLI and background service for downloading audiobooks from Libro.fm).
+          Previous baseline: ${CHANGELOG_REF}
+          ${CUMULATIVE_NOTE}
+
+          Analyze the diff and write user-facing release notes.
+
+          Format requirements:
+          - Use markdown headers (##, ###)
+          - Start with a 1-2 sentence summary of the release
+          - Group into sections: Features, Breaking Changes, Bug Fixes, Improvements
+          - Only include sections that have content
+          - For breaking changes, include migration steps
+          - For features, briefly explain usage
+          - Be concise but informative
+          - Do NOT include a commit list (that will be appended separately)
+          - Do NOT include a changelog link (that will be appended separately)
+          PROMPT
+
+          jq -n \
+            --arg model "$MODEL" \
+            --rawfile prompt /tmp/prompt.txt \
+            --rawfile diffstat /tmp/diffstat.txt \
+            --rawfile diff /tmp/fulldiff.txt \
+            --rawfile commits /tmp/commits.txt \
+            --rawfile prs /tmp/prs.txt \
+            '{
+              model: $model,
+              max_tokens: 4096,
+              messages: [{
+                role: "user",
+                content: ($prompt + "\n\n## Commits\n" + $commits + "\n\n## Merged PRs\n" + $prs + "\n\n## Diff Stats\n" + $diffstat + "\n\n## Full Diff\n" + $diff)
+              }]
+            }' > /tmp/request.json
+
+          HTTP_CODE=$(curl -s --max-time 120 -w '%{http_code}' -o /tmp/response.json \
+            -X POST https://api.anthropic.com/v1/messages \
+            -H "content-type: application/json" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d @/tmp/request.json)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Anthropic API ($MODEL) returned HTTP $HTTP_CODE"
+            cat /tmp/response.json
+            exit 1
+          fi
+
+          jq -r '.content[0].text' /tmp/response.json > /tmp/release_notes.txt
+          echo "Release notes generated ($(wc -c < /tmp/release_notes.txt) bytes)"
+
+      - name: Assemble release body
+        id: body
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          CHANGELOG_REF: ${{ steps.version.outputs.changelog_ref }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COMPARE_URL=$(cat /tmp/compare_url.txt)
+          NOTES_SOURCE="placeholder"
+
+          if [ -f /tmp/release_notes.txt ] && [ -s /tmp/release_notes.txt ]; then
+            NOTES_SOURCE="ai"
+            sed '1{/^#[[:space:]]/d}' /tmp/release_notes.txt > /tmp/release_body.md
+            {
+              echo ""
+              echo "## Commits"
+              echo ""
+              cat /tmp/commits.txt
+              echo ""
+              echo "**Full Changelog**: ${COMPARE_URL}"
+            } >> /tmp/release_body.md
+          elif gh api "repos/${REPO}/releases/generate-notes" \
+                 -X POST \
+                 -f tag_name="$TAG" \
+                 -f previous_tag_name="$CHANGELOG_REF" \
+                 --jq '.body' > /tmp/native_notes.txt 2>/tmp/native_err.txt \
+               && [ -s /tmp/native_notes.txt ]; then
+            NOTES_SOURCE="native"
+            cp /tmp/native_notes.txt /tmp/release_body.md
+          else
+            NOTES_SOURCE="placeholder"
+            [ -s /tmp/native_err.txt ] && {
+              echo "::warning::native generate-notes also failed:"
+              sed 's/^/  /' /tmp/native_err.txt
+            }
+            {
+              echo "## Release ${TAG}"
+              echo ""
+              echo "## Commits"
+              echo ""
+              cat /tmp/commits.txt
+              echo ""
+              echo "**Full Changelog**: ${COMPARE_URL}"
+            } > /tmp/release_body.md
+          fi
+
+          echo "Release body assembled from: ${NOTES_SOURCE}"
+          ENCODED=$(base64 -w 0 /tmp/release_body.md)
+          {
+            echo "release_body=${ENCODED}"
+            echo "notes_source=${NOTES_SOURCE}"
+          } >> "$GITHUB_OUTPUT"
 
   docker:
     name: Build & Push Docker Image
@@ -197,11 +479,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          # ai-release.yml emits a base64-encoded body; decode before use.
           echo "$BODY_B64" | base64 -d > /tmp/ai_body.md
-
-          # Prepend install snippets so consumers see "how do I get this?"
-          # before scrolling through the AI summary.
           {
             echo "## Install"
             echo ""
