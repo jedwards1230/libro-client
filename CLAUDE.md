@@ -52,9 +52,34 @@ src/
 
 ### External Dependencies
 
-- **Libro.fm API**: `https://libro.fm` — OAuth2 password grant, REST endpoints
+- **Libro.fm API**: `https://libro.fm` — OAuth2 password grant, REST endpoints.
+  Proprietary — see "Libro.fm API gotchas" below.
 - **Bun**: Runtime and bundler (no Node.js required)
 - **TypeScript**: Strict mode, `noEmit: true`, path alias `@/*` -> `src/*`
+
+## Libro.fm API gotchas
+
+Libro.fm publishes no API and ships no open-source client; endpoints, headers,
+and versions are reverse-engineered from the Android app. The actively-maintained
+reference is [burntcookie90/librofm-downloader](https://github.com/burntcookie90/librofm-downloader)
+— check its Dockerfile (`LIBRO_FM_HEADERS=...`) for the current required header values.
+
+- **`X-LibroFm-AppVer` is required.** Since late 2025, the ELB in front of `/oauth/token`
+  (and other endpoints) returns blanket `HTTP 401, content-length: 0, server: awselb/2.0`
+  for requests missing this header — **regardless of credential validity**. Identical
+  401s for valid and bogus credentials is the signature of this gate; it is not a stale
+  password. Current values live in `src/APIHandler.ts` (`userAgent`, `appVer`).
+- **`User-Agent` must match a real Android app version** (`okhttp/X.Y.Z`).
+- **API version drift**: this client uses `v7/v9`; burntcookie90 has moved to `v10`.
+  Both work today — if `v7/v9` start 404/410ing, bump to `v10`.
+- When auth breaks, first test `/oauth/token` with `curl` using the headers from
+  burntcookie90's Dockerfile; if that succeeds, update `APIHandler.ts` to match.
+
+## Docs
+
+No `docs/` tree — `README.md` is for users (CLI usage, install, env), `CLAUDE.md`
+is for sessions (architecture, gotchas, hooks). Don't add a `docs/` tree unless a
+real long-form spec needs one.
 
 ## Environment Variables
 
