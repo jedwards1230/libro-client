@@ -2,12 +2,19 @@ import logger, { LogMethod } from "./lib/Logger";
 
 const scope = "APIHandler";
 
+// Libro.fm has no public API; endpoints and required headers are reverse-engineered
+// from the official Android app. The actively-maintained reference implementation is
+// https://github.com/burntcookie90/librofm-downloader — keep these values in sync
+// with their Dockerfile's LIBRO_FM_HEADERS when libro.fm rotates them.
 export default class APIHandler {
 	static baseUrl = "https://libro.fm";
 	static loginEndpoint = "/oauth/token";
 	static libraryEndpoint = "/api/v7/library";
 	static downloadEndpoint = "/api/v9/download-manifest";
-	static userAgent = "okhttp/3.14.9";
+	static userAgent = "okhttp/5.3.2";
+	// Required since late 2025 — without it, /oauth/token returns 401 at the ELB
+	// before the request reaches the auth backend.
+	static appVer = "7.34.8";
 
 	/** Fetch Login Data */
 	@LogMethod({ scope, message: "Fetching login data..." })
@@ -75,8 +82,9 @@ export default class APIHandler {
 	/** General request headers. */
 	static getHeaders = (authToken?: string) => ({
 		"Content-Type": "application/json",
-		Authorization: `Bearer ${authToken}`,
-		...(authToken ? { "User-Agent": this.userAgent } : {}),
+		"User-Agent": this.userAgent,
+		"X-LibroFm-AppVer": this.appVer,
+		...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
 	});
 
 	@LogMethod({ scope })
