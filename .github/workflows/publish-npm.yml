@@ -1,0 +1,125 @@
+# Publish libro-client to npm whenever a GitHub Release is published.
+#
+# Uses npm Trusted Publishing (OIDC) — no NPM_TOKEN secret. The publisher
+# trust must be configured ONCE on npmjs.com:
+#   https://www.npmjs.com/package/libro-client/access → Trusted Publishers
+#   GitHub organization: jedwards1230
+#   Repository name:     libro-client
+#   Workflow filename:   publish-npm.yml
+#   Environment:         (leave blank)
+#
+# Trusted Publishing requires npm CLI >= 11.5.1, which is newer than what
+# ships with Node 22 (10.x). The job pins Node 24 and bumps npm to latest
+# explicitly so the OIDC flow works without any token.
+#
+# The released tag's package.json is bumped in-job to match the tag (the
+# tag is authoritative; main's package.json may drift). Provenance
+# attestations are generated automatically — npmjs.com will show a
+# "verified" badge linking back to this workflow run.
+
+name: Publish to npm
+
+run-name: >-
+  ${{
+    github.event_name == 'workflow_dispatch'
+      && format('npm publish: {0}{1}',
+           inputs.dry_run && 'dry-run ' || '',
+           inputs.tag)
+      || format('npm publish: {0}', github.event.release.tag_name)
+  }}
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to publish (e.g. v0.0.4). Must already exist."
+        required: true
+        type: string
+      dry_run:
+        description: "Run `npm publish --dry-run` to preview the tarball without uploading"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-npm-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write  # required for npm Trusted Publishing (OIDC)
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${EVENT_TAG:-$INPUT_TAG}"
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag resolved (neither release event nor workflow input)"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          {
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing ${TAG} (version ${VERSION})"
+
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Bump npm to latest (Trusted Publishing requires >= 11.5.1)
+        run: npm install -g npm@latest
+
+      - name: Sync package.json version to tag
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Update version in-job only — never committed. Git tag is the
+          # source of truth; main's package.json may legitimately drift.
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "package.json version: $(jq -r '.version' package.json)"
+
+      - name: Publish (dry run)
+        if: inputs.dry_run == true
+        run: npm publish --dry-run --provenance --access public
+
+      - name: Publish
+        if: inputs.dry_run != true
+        run: npm publish --provenance --access public
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## npm publish — ${TAG}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Registry | https://www.npmjs.com/package/libro-client/v/${VERSION} |"
+            echo "| Dry run | ${DRY_RUN:-false} |"
+            echo "| Provenance | enabled (OIDC) |"
+          } >> "$GITHUB_STEP_SUMMARY"

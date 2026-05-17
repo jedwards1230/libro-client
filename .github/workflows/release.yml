@@ -1,11 +1,25 @@
-# Auto-release on every merge to main.
-# Default: patch bump. Use semver:minor or semver:major PR labels for bigger bumps.
-# Add skip-release label to skip releasing entirely.
-# Also supports manual workflow_dispatch with bump type or version override.
+# Auto-tag + release on push to main.
+#
+# Reads the merged PR's `semver:*` label (defaults to patch, `skip-release`
+# opts out), then delegates tag creation and AI release notes to the shared
+# jedwards1230/release-workflows/ai-release.yml workflow. Builds + pushes
+# the multi-arch Docker image to Docker Hub from the tag ref, then creates
+# the GitHub Release with the Docker pull snippet prepended to the AI body.
+#
+# Publishing to npm is handled by a separate `publish-npm.yml` workflow
+# that triggers off the GitHub Release event — per-repo distribution
+# concerns live in this repo, not in ai-release.yml.
 
 name: Release
 
-run-name: "${{ inputs.version && format('Release v{0}', inputs.version) || inputs.bump_type && format('Release ({0})', inputs.bump_type) || 'Auto-release' }}"
+run-name: >-
+  ${{
+    github.event_name == 'workflow_dispatch'
+      && format('Release: {0}{1}',
+           inputs.dry_run && 'dry-run ' || '',
+           inputs.bump_type)
+      || format('Release: {0}', github.event.head_commit.message || github.sha)
+  }}
 
 on:
   push:
@@ -13,230 +27,223 @@ on:
   workflow_dispatch:
     inputs:
       bump_type:
-        description: "Bump type"
-        required: false
+        description: "Version bump type"
+        required: true
         type: choice
         options:
           - patch
           - minor
           - major
         default: patch
-      version:
-        description: "Override version (e.g. 1.0.0) — takes precedence over bump type"
+      dry_run:
+        description: "Dry run — compute version and preview notes without tagging or releasing"
         required: false
-        type: string
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
-  packages: write
+  pull-requests: read
 
 jobs:
-  # Step 1: Compute version and run tests
-  validate:
-    name: Validate & Compute Version
+  detect:
+    name: Detect bump type
     runs-on: ubuntu-latest
-    if: "!startsWith(github.event.head_commit.message, 'Release v')"
     outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      version: ${{ steps.version.outputs.version }}
-      skipped: ${{ steps.bump.outputs.skip }}
-      bump_type: ${{ steps.bump.outputs.type || inputs.bump_type || 'override' }}
+      bump_type: ${{ steps.bump.outputs.type }}
+      dry_run: ${{ steps.bump.outputs.dry_run }}
+      skip: ${{ steps.bump.outputs.skip }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine bump type from PR labels
+      - name: Determine bump type
         id: bump
-        if: github.event_name == 'push'
-        run: |
-          COMMIT_SHA="${{ github.sha }}"
-          PR_NUMBER=$(gh pr list --state merged --json number,mergeCommit \
-            --jq ".[] | select(.mergeCommit.oid == \"${COMMIT_SHA}\") | .number" || true)
-
-          if [ -z "$PR_NUMBER" ]; then
-            echo "No PR found for commit $COMMIT_SHA — using patch bump"
-            echo "type=patch" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' || true)
-
-          if echo "$LABELS" | grep -q 'skip-release'; then
-            echo "skip-release label found — skipping"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          elif echo "$LABELS" | grep -q 'semver:major'; then
-            echo "type=major" >> $GITHUB_OUTPUT
-          elif echo "$LABELS" | grep -q 'semver:minor'; then
-            echo "type=minor" >> $GITHUB_OUTPUT
-          else
-            echo "type=patch" >> $GITHUB_OUTPUT
-          fi
         env:
           GH_TOKEN: ${{ github.token }}
-
-      - name: Skip check
-        if: steps.bump.outputs.skip == 'true'
-        run: echo "Skipping release due to skip-release label"
-
-      - name: Compute next version
-        id: version
-        if: steps.bump.outputs.skip != 'true'
+          GH_REPO: ${{ github.repository }}
         run: |
-          OVERRIDE="${{ inputs.version }}"
+          set -euo pipefail
 
-          if [ -n "$OVERRIDE" ]; then
-            if ! echo "$OVERRIDE" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-              echo "::error::Invalid version format '$OVERRIDE'. Expected: X.Y.Z"
-              exit 1
+          # workflow_dispatch: use provided inputs verbatim.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            {
+              echo "type=${{ inputs.bump_type }}"
+              echo "dry_run=${{ inputs.dry_run }}"
+              echo "skip=false"
+            } >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "::notice::Dry run: previewing release with bump_type=${{ inputs.bump_type }}"
             fi
-            NEXT_VERSION="$OVERRIDE"
+            exit 0
+          fi
+
+          # push event: look up labels on the PR whose merge produced this commit.
+          # Retry up to 3x — GitHub may not have indexed the merge commit yet
+          # right after the push event fires.
+          LABELS=""
+          for attempt in 1 2 3; do
+            LABELS=$(gh pr list --state merged --base main --limit 100 \
+              --json labels,mergeCommit \
+              | jq -r --arg sha "$GITHUB_SHA" \
+                '.[] | select(.mergeCommit.oid == $sha) | .labels[].name' 2>/dev/null || echo "")
+            if [ -n "$LABELS" ]; then
+              break
+            fi
+            echo "Attempt ${attempt}: no labels found for ${GITHUB_SHA}, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "Labels for commit ${GITHUB_SHA}: ${LABELS:-<none>}"
+
+          if echo "$LABELS" | grep -q '^skip-release$'; then
+            echo "::notice::skip-release label present — skipping release"
+            {
+              echo "skip=true"
+              echo "type=patch"
+              echo "dry_run=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if echo "$LABELS" | grep -q '^semver:major$'; then
+            BUMP=major
+          elif echo "$LABELS" | grep -q '^semver:minor$'; then
+            BUMP=minor
           else
-            BUMP_TYPE="${{ steps.bump.outputs.type || inputs.bump_type }}"
-            LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1 || true)
-
-            if [ -z "$LATEST_TAG" ]; then
-              # No tags yet — seed from package.json version
-              PKG_VERSION=$(jq -r '.version' package.json)
-              MAJOR=$(echo "$PKG_VERSION" | cut -d. -f1)
-              MINOR=$(echo "$PKG_VERSION" | cut -d. -f2)
-              PATCH=$(echo "$PKG_VERSION" | cut -d. -f3)
-            else
-              LATEST_VERSION="${LATEST_TAG#v}"
-              MAJOR=$(echo "$LATEST_VERSION" | cut -d. -f1)
-              MINOR=$(echo "$LATEST_VERSION" | cut -d. -f2)
-              PATCH=$(echo "$LATEST_VERSION" | cut -d. -f3)
-            fi
-
-            case "$BUMP_TYPE" in
-              major) NEXT_VERSION="$((MAJOR + 1)).0.0" ;;
-              minor) NEXT_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
-              patch) NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
-            esac
+            # Default to patch — applies to `semver:patch` label AND no-label merges.
+            BUMP=patch
           fi
+          {
+            echo "type=${BUMP}"
+            echo "skip=false"
+            echo "dry_run=false"
+          } >> "$GITHUB_OUTPUT"
 
-          TAG="v${NEXT_VERSION}"
+  prepare:
+    name: Tag & Generate Notes
+    needs: [detect]
+    if: needs.detect.outputs.skip != 'true'
+    uses: jedwards1230/release-workflows/.github/workflows/ai-release.yml@v0
+    with:
+      service_name: libro-client
+      service_description: "a Bun-based CLI and background service for downloading audiobooks from Libro.fm"
+      bump_type: ${{ needs.detect.outputs.bump_type }}
+      dry_run: ${{ needs.detect.outputs.dry_run == 'true' }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG already exists"
-            exit 1
-          fi
-
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
-          echo "Next version: $NEXT_VERSION (tag: $TAG)"
-
-      - name: Setup Bun
-        if: steps.bump.outputs.skip != 'true'
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        if: steps.bump.outputs.skip != 'true'
-        run: bun install --frozen-lockfile
-
-      - name: Run tests
-        if: steps.bump.outputs.skip != 'true'
-        run: bun test
-
-  # Step 2: Build and push Docker image (before tagging)
   docker:
     name: Build & Push Docker Image
-    needs: validate
-    if: needs.validate.outputs.skipped != 'true' && needs.validate.outputs.tag != ''
+    needs: [detect, prepare]
+    if: needs.detect.outputs.skip != 'true' && needs.detect.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
-          platforms: linux/amd64,linux/arm64
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
+            jedwards1230/libro:${{ needs.prepare.outputs.version }}
             jedwards1230/libro:latest
-            jedwards1230/libro:${{ needs.validate.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Summary
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- \`jedwards1230/libro:${{ needs.validate.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`jedwards1230/libro:latest\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Docker Image"
+            echo ""
+            echo "| Tag | Pull |"
+            echo "|-----|------|"
+            echo "| \`jedwards1230/libro:${VERSION}\` | \`docker pull jedwards1230/libro:${VERSION}\` |"
+            echo "| \`jedwards1230/libro:latest\` | \`docker pull jedwards1230/libro:latest\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  # Step 3: Tag, bump package.json, and create GitHub Release (only after Docker succeeds)
   release:
-    name: Tag & Release
-    needs: [validate, docker]
-    if: needs.validate.outputs.skipped != 'true' && needs.validate.outputs.tag != ''
+    name: Create GitHub Release
+    needs: [detect, prepare, docker]
+    if: needs.detect.outputs.skip != 'true' && needs.detect.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Bump package.json version
+      - name: Compose release body (install snippets + AI notes)
+        env:
+          BODY_B64: ${{ needs.prepare.outputs.release_body }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
-          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
+          set -euo pipefail
+          # ai-release.yml emits a base64-encoded body; decode before use.
+          echo "$BODY_B64" | base64 -d > /tmp/ai_body.md
 
-      - name: Commit version bump and tag
-        run: |
-          TAG="${{ needs.validate.outputs.tag }}"
-          VERSION="${{ needs.validate.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "Release ${TAG}" || true
-          git tag -a "$TAG" -m "Release $VERSION"
-          git push origin HEAD:main --follow-tags
+          # Prepend install snippets so consumers see "how do I get this?"
+          # before scrolling through the AI summary.
+          {
+            echo "## Install"
+            echo ""
+            echo "### Docker"
+            echo ""
+            echo '```bash'
+            echo "docker pull jedwards1230/libro:${VERSION}"
+            echo '```'
+            echo ""
+            echo "### npm"
+            echo ""
+            echo '```bash'
+            echo "npm install -g libro-client@${VERSION}"
+            echo '```'
+            echo ""
+            echo "---"
+            echo ""
+          } > /tmp/release_body.md
+          cat /tmp/ai_body.md >> /tmp/release_body.md
 
       - name: Create GitHub Release
-        run: |
-          TAG="${{ needs.validate.outputs.tag }}"
-          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | grep -B1 "^${TAG}$" | head -1)
-
-          RELEASE_ARGS=(
-            "$TAG"
-            --title "Release ${{ needs.validate.outputs.version }}"
-            --generate-notes
-            --latest
-          )
-
-          # Only add --notes-start-tag if a valid previous tag exists
-          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
-            RELEASE_ARGS+=(--notes-start-tag "$PREV_TAG")
-          fi
-
-          gh release create "${RELEASE_ARGS[@]}"
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Release ${{ needs.prepare.outputs.version }}
+          body_path: /tmp/release_body.md
+          make_latest: true
 
       - name: Summary
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUMP_TYPE: ${{ needs.detect.outputs.bump_type }}
         run: |
-          TAG="${{ needs.validate.outputs.tag }}"
-          echo "## Release $TAG" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | ${{ needs.validate.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Bump Type | ${{ needs.validate.outputs.bump_type }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker | \`jedwards1230/libro:${{ needs.validate.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Release ${TAG}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | ${VERSION} |"
+            echo "| Bump | ${BUMP_TYPE} |"
+            echo "| Image | \`jedwards1230/libro:${VERSION}\` |"
+            echo ""
+            echo "npm publishing is handled by \`publish-npm.yml\`, triggered automatically by the release event."
+          } >> "$GITHUB_STEP_SUMMARY"
