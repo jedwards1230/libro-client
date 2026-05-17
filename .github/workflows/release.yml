@@ -472,6 +472,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write  # required for `gh workflow run publish-npm.yml`
     steps:
       - name: Compose release body (install snippets + AI notes)
         env:
@@ -508,6 +509,16 @@ jobs:
           body_path: /tmp/release_body.md
           make_latest: true
 
+      - name: Trigger npm publish workflow
+        # The `release: published` event won't fire publish-npm.yml when the
+        # release is created by GITHUB_TOKEN (GitHub's anti-recursion safety),
+        # so we dispatch it explicitly. workflow_dispatch from GITHUB_TOKEN
+        # does cross workflow boundaries.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh workflow run publish-npm.yml --repo "${{ github.repository }}" --ref main --field tag="$TAG"
+
       - name: Summary
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
@@ -523,5 +534,5 @@ jobs:
             echo "| Bump | ${BUMP_TYPE} |"
             echo "| Image | \`jedwards1230/libro:${VERSION}\` |"
             echo ""
-            echo "npm publishing is handled by \`publish-npm.yml\`, triggered automatically by the release event."
+            echo "npm publishing dispatched to \`publish-npm.yml\` for tag \`${TAG}\`."
           } >> "$GITHUB_STEP_SUMMARY"
