@@ -7,12 +7,13 @@
 # pushes the multi-arch Docker image, and creates the GitHub Release with
 # install snippets prepended to the AI body.
 #
-# This is a self-contained version of the
-# `jedwards1230/release-workflows/.github/workflows/ai-release.yml@v0`
-# reusable workflow. Inlined here because release-workflows is a private
-# repo and reusable workflows can't be called across the public/private
-# boundary — libro-client is public. If release-workflows ever flips
-# public, this can be slimmed back down to a thin caller of @v0.
+# This is a self-contained version of the release-notes/tag logic now shared as
+# `jedwards1230/release-workflows/.github/workflows/ai-release.yml@v1`. It was
+# originally inlined because release-workflows was private and reusables can't
+# cross the public/private boundary. release-workflows is now PUBLIC, so this
+# could be slimmed to a thin caller of ai-release.yml@v1 (single-file pattern,
+# like gpu-arbiter/deck) that keeps only the Docker-build + GitHub-Release steps.
+# Left inlined for now; the migration is a tracked follow-up, not a blocker.
 #
 # Publishing to npm is handled by a separate `publish-npm.yml` workflow
 # that triggers off the GitHub Release event.
