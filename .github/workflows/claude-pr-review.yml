@@ -1,0 +1,29 @@
+# Claude PR review — calls the shared reusable workflow in
+# jedwards1230/release-workflows (claude-code-action@v1, Haiku, review-team +
+# public marketplace + github_ci by default).
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    uses: jedwards1230/release-workflows/.github/workflows/claude-pr-review.yml@v1
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      focus: |
+        libro-client is a TypeScript audiobook service.
+        - TS/Node correctness: unhandled promise rejections, missing await,
+          any-typed boundaries, unchecked external responses.
+        - Input validation on API/route handlers; path/URL handling.
+        - Secrets: no API keys/tokens leaked into client bundles or logs.
+        - Dependency/supply-chain risk on new deps.
+        Do NOT re-flag eslint/prettier/tsc — CI owns those.
