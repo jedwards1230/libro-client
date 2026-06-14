@@ -8,6 +8,9 @@ Audiobook downloader and service for Libro.fm. Downloads audiobooks from the Lib
 # Install dependencies
 bun install
 
+# Run tests
+bun test
+
 # Type check (no emit)
 bunx tsc --noEmit
 
@@ -75,12 +78,6 @@ reference is [burntcookie90/librofm-downloader](https://github.com/burntcookie90
 - When auth breaks, first test `/oauth/token` with `curl` using the headers from
   burntcookie90's Dockerfile; if that succeeds, update `APIHandler.ts` to match.
 
-## Docs
-
-No `docs/` tree — `README.md` is for users (CLI usage, install, env), `CLAUDE.md`
-is for sessions (architecture, gotchas, hooks). Don't add a `docs/` tree unless a
-real long-form spec needs one.
-
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -90,13 +87,3 @@ real long-form spec needs one.
 
 Credentials are persisted to `data/config/config.json` after first successful login. Auth tokens are also cached there.
 
-## Hooks
-
-Hooks live in `.claude/hooks/` and fire at key points in Claude Code sessions.
-
-- `session-start.sh` — Detects Claude Code Web; installs bun if missing, then runs `bun install`
-- `pre-tool-use.sh` — Logs tool name; exits 0 (no blocking)
-- `post-tool-use.sh` — Stub; no auto-formatter configured yet
-- `stop.sh` — Runs `bunx tsc --noEmit` to type-check after every response
-- `subagent-stop.sh` — Stub
-- `session-end.sh` — Stub

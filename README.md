@@ -11,19 +11,18 @@ This is a simple command-line tool for interacting with your Libro.fm library. I
 
 ### Installation
 
-The CLI can be installed as a global package using npm:
+Build the standalone CLI binary (requires [Bun](https://bun.sh)):
 
 ```bash
-bun add -g libro-client
+bun install
+bun run build:cli   # outputs bin/libro
 ```
 
-To run the tool, use the following command:
+Then either run `bin/libro` directly or add `bin/` to your `PATH`:
 
 ```bash
-libro
+./bin/libro
 ```
-
-This will display a list of available commands.
 
 ### List audiobooks
 
@@ -90,9 +89,9 @@ docker-compose up -d
 You can set the following environment variables:
 
 ```bash
-DEBUG=false
-LIBROFM_USERNAME=<your_librofm_username>
-LIBROFM_PASSWORD=<your_librofm_password>
+DEBUG=true                          # enable debug-level logging (default: off)
+LIBROFM_USERNAME=<your_username>    # Libro.fm account email
+LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 ```
 
 ## Disclaimer
