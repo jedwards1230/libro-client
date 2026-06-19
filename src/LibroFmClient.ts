@@ -4,6 +4,7 @@ import APIHandler from "@/APIHandler";
 import logger, { LogMethod } from "@/lib/Logger";
 import Config from "@/lib/Config";
 import State from "@/lib/State";
+import { DOWNLOAD_DIR } from "@/lib/Directories";
 
 const scope = "LibroFmClient";
 
@@ -30,7 +31,14 @@ export default class LibroFmClient {
 			await this.login(this.config.username, this.config.password);
 		}
 		if (!this.config.downloadDir) {
-			const downloadDir = await InputHandler.requestDownloadLocation();
+			// In a non-interactive (headless/service) environment there is no
+			// TTY to answer a prompt — fall back to the default downloads
+			// directory instead of spinning the event loop forever on an
+			// @inquirer prompt that can never resolve. Interactive callers are
+			// still prompted as before.
+			const downloadDir = process.stdin.isTTY
+				? await InputHandler.requestDownloadLocation()
+				: DOWNLOAD_DIR;
 			this.config.change({ downloadDir });
 
 			if (!this.config.downloadDir) {
