@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: ["main"]
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -31,3 +38,20 @@ jobs:
           echo "- **Branch**: \`${{ github.head_ref || github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Bun version**: $(bun --version)" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  ci:
+    name: CI
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          results=("${{ needs.test.result }}")
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "CI failed"
+              exit 1
+            fi
+          done
+          echo "All checks passed"
