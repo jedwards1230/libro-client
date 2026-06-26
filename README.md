@@ -94,6 +94,10 @@ LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 ```
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, build/test commands, and the PR workflow.
+
 ## Disclaimer
 
 This tool is not affiliated with Libro.fm in any way. Use it at your own risk.
