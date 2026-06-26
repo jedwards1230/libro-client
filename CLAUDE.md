@@ -1,30 +1,17 @@
+@CONTRIBUTING.md
+
 # libro-client
 
 Audiobook downloader and service for Libro.fm. Downloads audiobooks from the Libro.fm API, tracks local state, and supports both interactive CLI usage and automated service mode.
 
-## Quick Start
+## Running locally
 
 ```bash
-# Install dependencies
-bun install
-
-# Run tests
-bun test
-
-# Type check (no emit)
-bunx tsc --noEmit
-
 # Run CLI
 bun run cli.ts <command>
 
 # Run as background service (polls every 30s)
 bun run service.ts
-
-# Build standalone binary
-bun run build:cli
-
-# Build Docker image
-bun run build:docker
 ```
 
 ## Architecture
