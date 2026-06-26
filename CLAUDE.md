@@ -1,6 +1,6 @@
-@CONTRIBUTING.md
-
 # libro-client
+
+@CONTRIBUTING.md
 
 Audiobook downloader and service for Libro.fm. Downloads audiobooks from the Libro.fm API, tracks local state, and supports both interactive CLI usage and automated service mode.
 
