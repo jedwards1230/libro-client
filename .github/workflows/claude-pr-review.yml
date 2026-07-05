@@ -18,6 +18,7 @@ jobs:
     if: github.event.action != 'closed'
     uses: jedwards1230/release-workflows/.github/workflows/claude-pr-review.yml@v1
     secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }} # preferred (subscription)
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     with:
       focus: |
