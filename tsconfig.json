@@ -23,9 +23,8 @@
 		"noUnusedParameters": false,
 		"noPropertyAccessFromIndexSignature": false,
 
-		"baseUrl": ".",
 		"paths": {
-			"@/*": ["src/*"]
+			"@/*": ["./src/*"]
 		}
 	},
 	"include": ["./src/**/*", "./cli.ts", "./service.ts"],
