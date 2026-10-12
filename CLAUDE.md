@@ -27,7 +27,8 @@ src/
     Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/)
     DownloadClient.ts — File download + zip extraction
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
-    Logger.ts       — Winston logger + @LogMethod decorator
+    Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials)
+    Security.ts     — Secret redaction, libro.fm host check, path guards, 0600 file writes
     State.ts        — Local book state (data/config/state.json)
   types.d.ts        — Global TypeScript types (Audiobook, AudiobookMap, etc.)
 ```
@@ -88,4 +89,21 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 
-Credentials are persisted to `data/config/config.json` after first successful login. Auth tokens are also cached there.
+Only the username, auth token and download directory are persisted to `data/config/config.json`
+(mode `0600`; `data/` is `0700`). The password is never written to disk — a fresh login takes it
+from `LIBROFM_PASSWORD` or an interactive prompt, and an old config that still holds one is
+rewritten without it on the next start.
+
+## Handling secrets
+
+- `@LogMethod` logs every argument at `silly` level, and `silly.log` is always written. All log
+  output goes through `redact()`/`scrubString()` in `src/lib/Security.ts`: sensitive keys
+  (`password`, `*token*`, `Authorization`, `username`, …), bearer tokens, signed-URL query
+  params, and any value passed to `registerSecret()` are replaced with `[REDACTED]`.
+- A new method that takes a credential positionally must declare it:
+  `@LogMethod({ scope, secretArgs: [0] })`. `Config` registers the values it holds.
+- The bearer token is only sent to `https://libro.fm` and its subdomains (`isLibroFmUrl`);
+  CDN part URLs are fetched without it.
+- Folder names built from API metadata go through `safePathSegment`, and writes are checked
+  with `isWithin` (download dir, cache dir, zip entries).
+- `.dockerignore` excludes `data/` — never bake `data/config` or `data/logs` into an image.

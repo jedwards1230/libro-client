@@ -1,12 +1,23 @@
 import fs from "fs";
 import { CONFIG_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
+import { registerSecret, writePrivateFile } from "./Security";
 
 const USERNAME = process.env.LIBROFM_USERNAME;
 const PASSWORD = process.env.LIBROFM_PASSWORD;
 const DOWNLOAD_DIR = process.env.LIBROFM_DOWNLOAD_DIR;
 
 const scope = "Config";
+
+/**
+ * The fields written to config.json. The password is deliberately left out:
+ * the cached authToken is enough to stay logged in, and a fresh login takes
+ * the password from LIBROFM_PASSWORD or an interactive prompt.
+ */
+export function persistedConfig(config: Partial<Config>) {
+	const { password, ...persisted } = config;
+	return persisted;
+}
 
 /** Configuration for the app */
 export default class Config {
@@ -24,6 +35,7 @@ export default class Config {
 	@LogMethod({ scope })
 	change(config: Partial<Config>): void {
 		Object.assign(this, config);
+		this.registerSecrets();
 		this.save();
 	}
 
@@ -35,11 +47,21 @@ export default class Config {
 			const data = fs.readFileSync(CONFIG_PATH, "utf-8");
 			config = JSON.parse(data);
 			Object.assign(this, config);
+			// Older versions saved the password; rewrite the file without it.
+			if (config && "password" in config) this.save();
 		} else {
-			fs.writeFileSync(CONFIG_PATH, JSON.stringify(this, null, 2));
+			this.save();
 		}
 		this.loadEnv();
+		this.registerSecrets();
 		return config;
+	}
+
+	/** Keep credentials out of the logs wherever they appear. */
+	private registerSecrets(): void {
+		registerSecret(this.username);
+		registerSecret(this.password);
+		registerSecret(this.authToken);
 	}
 
 	/** Load Environment variables */
@@ -53,6 +75,9 @@ export default class Config {
 	/** Saves the config to the file system */
 	@LogMethod({ scope })
 	private save(): void {
-		fs.writeFileSync(CONFIG_PATH, JSON.stringify(this, null, 2));
+		writePrivateFile(
+			CONFIG_PATH,
+			JSON.stringify(persistedConfig(this), null, 2)
+		);
 	}
 }

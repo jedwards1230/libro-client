@@ -1,7 +1,10 @@
+/bin
 /config
+/data
 /downloads
 /logs
 /node_modules
 .env
+.env.*
 .git
 .gitignore

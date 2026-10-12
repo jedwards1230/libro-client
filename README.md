@@ -94,6 +94,14 @@ LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 ```
 
+### Where your credentials go
+
+- Your password is only sent to `https://libro.fm/oauth/token`. It is never written to disk: after
+  the first login, only your username and the session token are kept in `data/config/config.json`,
+  readable by your user only.
+- Logs in `data/logs/` redact passwords, tokens and signed download links.
+- The Docker image never includes `data/`; mount it as a volume (see `docker-compose.yml`).
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, build/test commands, and the PR workflow.

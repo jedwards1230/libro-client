@@ -23,7 +23,11 @@ export default class APIHandler {
 	static osVer = "Android 34";
 
 	/** Fetch Login Data */
-	@LogMethod({ scope, message: "Fetching login data..." })
+	@LogMethod({
+		scope,
+		message: "Fetching login data...",
+		secretArgs: [0, 1],
+	})
 	static async fetchLoginData(
 		username: string,
 		password: string
@@ -41,7 +45,7 @@ export default class APIHandler {
 	}
 
 	/** Fetch Library */
-	@LogMethod({ scope, message: "Fetching library..." })
+	@LogMethod({ scope, message: "Fetching library...", secretArgs: [0] })
 	static async fetchLibrary(
 		authToken: string,
 		page: number = 1
@@ -61,6 +65,7 @@ export default class APIHandler {
 	@LogMethod({
 		scope,
 		message: "Fetching audiobook metadata...",
+		secretArgs: [0],
 	})
 	static async fetchDownloadMetadata(
 		authToken: string,

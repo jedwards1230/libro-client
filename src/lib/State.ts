@@ -1,6 +1,7 @@
 import fs from "fs";
 import { STATE_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
+import { writePrivateFile } from "./Security";
 
 const scope = "State";
 
@@ -54,7 +55,7 @@ export default class State {
 			stateData = JSON.parse(data);
 			Object.assign(this, { downloadedAudioBooks: stateData });
 		} else {
-			fs.writeFileSync(STATE_PATH, JSON.stringify(this, null, 2));
+			writePrivateFile(STATE_PATH, JSON.stringify(this, null, 2));
 		}
 
 		return stateData;
@@ -63,7 +64,7 @@ export default class State {
 	/** Saves the state to the file system */
 	@LogMethod({ scope })
 	private save(): void {
-		fs.writeFileSync(
+		writePrivateFile(
 			STATE_PATH,
 			JSON.stringify(this.downloadedAudioBooks, null, 2)
 		);
