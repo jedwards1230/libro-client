@@ -1,5 +1,13 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
-import APIHandler from "../APIHandler";
+import {
+	describe,
+	test,
+	expect,
+	mock,
+	beforeEach,
+	afterEach,
+	spyOn,
+} from "bun:test";
+import APIHandler, { ApiError } from "../APIHandler";
 
 describe("APIHandler", () => {
 	describe("getHeaders", () => {
@@ -19,12 +27,18 @@ describe("APIHandler", () => {
 			// /oauth/token returns 401 at the ELB without these headers,
 			// so they must be sent on unauthed requests too.
 			const unauthed = APIHandler.getHeaders();
-			expect(unauthed["User-Agent"]).toBe("okhttp/5.3.2");
-			expect(unauthed["X-LibroFm-AppVer"]).toBe("7.34.8");
+			expect(unauthed["User-Agent"]).toBe("okhttp/4.12.0");
+			expect(unauthed["X-LibroFm-AppVer"]).toBe("7.39.1");
 
 			const authed = APIHandler.getHeaders("test-token");
-			expect(authed["User-Agent"]).toBe("okhttp/5.3.2");
-			expect(authed["X-LibroFm-AppVer"]).toBe("7.34.8");
+			expect(authed["User-Agent"]).toBe("okhttp/4.12.0");
+			expect(authed["X-LibroFm-AppVer"]).toBe("7.39.1");
+		});
+
+		test("includes the app's device and OS headers", () => {
+			const headers = APIHandler.getHeaders();
+			expect(headers["X-LibroFm-Device"]).toBe("libro-client");
+			expect(headers["X-LibroFm-OsVer"]).toBe("Android 34");
 		});
 	});
 
@@ -38,11 +52,11 @@ describe("APIHandler", () => {
 		});
 
 		test("has correct library endpoint", () => {
-			expect(APIHandler.libraryEndpoint).toBe("/api/v7/library");
+			expect(APIHandler.libraryEndpoint).toBe("/api/v12/library");
 		});
 
 		test("has correct download endpoint", () => {
-			expect(APIHandler.downloadEndpoint).toBe("/api/v9/download-manifest");
+			expect(APIHandler.downloadEndpoint).toBe("/api/v12/download-manifest");
 		});
 	});
 
@@ -149,7 +163,7 @@ describe("APIHandler", () => {
 			const result = await APIHandler.fetchLibrary("token123", 2);
 
 			const [url, opts] = fetchMock.mock.calls[0];
-			expect(url).toBe("https://libro.fm/api/v7/library?page=2");
+			expect(url).toBe("https://libro.fm/api/v12/library?page=2");
 			expect(opts.headers.Authorization).toBe("Bearer token123");
 			expect(result.audiobooks).toHaveLength(1);
 		});
@@ -173,7 +187,28 @@ describe("APIHandler", () => {
 			await APIHandler.fetchLibrary("token123");
 
 			const [url] = fetchMock.mock.calls[0];
-			expect(url).toBe("https://libro.fm/api/v7/library?page=1");
+			expect(url).toBe("https://libro.fm/api/v12/library?page=1");
+		});
+
+		test("normalizes numeric isbns to strings", async () => {
+			// v12 types isbn as a long; numbers must still work as map keys.
+			const fetchMock = mock(() =>
+				Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({
+							page: 1,
+							total_pages: 1,
+							audiobooks: [{ isbn: 9781234567897, title: "Numeric" }],
+							ebooks: [],
+							tags: [],
+						}),
+				} as Response)
+			);
+			globalThis.fetch = fetchMock;
+
+			const result = await APIHandler.fetchLibrary("token123");
+			expect(result.audiobooks[0].isbn).toBe("9781234567897");
 		});
 	});
 
@@ -204,9 +239,105 @@ describe("APIHandler", () => {
 
 			const [url] = fetchMock.mock.calls[0];
 			expect(url).toBe(
-				"https://libro.fm/api/v9/download-manifest?isbn=1234567890"
+				"https://libro.fm/api/v12/download-manifest?isbn=1234567890&client_version=7.39.1"
 			);
 			expect(result.isbn).toBe("1234567890");
+		});
+
+		test("normalizes a numeric isbn to a string", async () => {
+			const fetchMock = mock(() =>
+				Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({
+							isbn: 9781234567897,
+							parts: [],
+							tracks: [],
+							expires_at: "2026-01-01",
+							version: 3,
+							size_bytes: 0,
+						}),
+				} as Response)
+			);
+			globalThis.fetch = fetchMock;
+
+			const result = await APIHandler.fetchDownloadMetadata(
+				"token",
+				"9781234567897"
+			);
+			expect(result.isbn).toBe("9781234567897");
+		});
+	});
+
+	describe("isRejectedLogin", () => {
+		afterEach(() => {
+			mock.restore();
+		});
+
+		/** The error fetchLoginData throws for this response. */
+		async function loginError(response: Response | Error): Promise<unknown> {
+			const fetchSpy = spyOn(globalThis, "fetch");
+			if (response instanceof Error) fetchSpy.mockRejectedValue(response);
+			else fetchSpy.mockResolvedValue(response);
+			try {
+				await APIHandler.fetchLoginData("reader@example.com", "wrong");
+			} catch (error) {
+				return error;
+			}
+			throw new Error("login did not fail");
+		}
+
+		const json = (body: object, status: number) =>
+			new Response(JSON.stringify(body), {
+				status,
+				headers: { "Content-Type": "application/json" },
+			});
+
+		test("a JSON 401 with an OAuth error is a rejected login", async () => {
+			const error = await loginError(
+				json(
+					{
+						error: "invalid_grant",
+						error_description: "The provided authorization grant is invalid",
+					},
+					401
+				)
+			);
+			expect(error).toBeInstanceOf(ApiError);
+			expect(error).toMatchObject({ status: 401, code: "invalid_grant" });
+			expect((error as Error).message).toContain("HTTP 401");
+			expect((error as Error).message).toContain("invalid_grant");
+			expect(APIHandler.isRejectedLogin(error)).toBe(true);
+		});
+
+		test("so is a JSON 400, or an error in a 200 body", async () => {
+			for (const status of [400, 200]) {
+				const error = await loginError(json({ error: "invalid_grant" }, status));
+				expect(error).toMatchObject({ status, code: "invalid_grant" });
+				expect(APIHandler.isRejectedLogin(error)).toBe(true);
+				mock.restore();
+			}
+		});
+
+		test("the ELB's empty 401 (missing app-version header) is not", async () => {
+			const error = await loginError(new Response(null, { status: 401 }));
+			expect(error).toMatchObject({ status: 401, code: undefined });
+			expect(APIHandler.isRejectedLogin(error)).toBe(false);
+		});
+
+		test("429 and 5xx are not, even with an error code", async () => {
+			for (const status of [429, 500, 503]) {
+				const error = await loginError(
+					json({ error: "temporarily_unavailable" }, status)
+				);
+				expect(APIHandler.isRejectedLogin(error)).toBe(false);
+				mock.restore();
+			}
+		});
+
+		test("a network failure is not", async () => {
+			const error = await loginError(new TypeError("fetch failed"));
+			expect(APIHandler.isRejectedLogin(error)).toBe(false);
 		});
 	});
 });

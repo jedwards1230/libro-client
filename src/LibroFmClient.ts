@@ -5,13 +5,33 @@ import logger, { LogMethod } from "@/lib/Logger";
 import Config from "@/lib/Config";
 import State from "@/lib/State";
 import { DOWNLOAD_DIR } from "@/lib/Directories";
+import { safePathSegment } from "@/lib/Security";
+import {
+	buildHistory,
+	trackLengthsFromState,
+	type HistoryEntry,
+} from "@/lib/History";
 
 const scope = "LibroFmClient";
 
+/**
+ * Can't log in with these credentials: Libro.fm turned them down, or there are
+ * none and no terminal to ask. Retrying with the same settings won't help.
+ */
+export class CredentialsError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options);
+		this.name = "CredentialsError";
+	}
+}
+
 /** Client for the Libro.fm API. */
 export default class LibroFmClient {
-	config = new Config();
-	state = new State();
+	/** `config` and `state` default to the files in data/config/; tests pass fakes. */
+	constructor(
+		public config: Config = new Config(),
+		public state: State = new State()
+	) {}
 
 	/**
 	 * Initialize the client.
@@ -19,17 +39,12 @@ export default class LibroFmClient {
 	 * */
 	@LogMethod({ scope, message: "Initializing client..." })
 	async init() {
-		if (!this.config.authToken) {
-			if (!this.config.username || !this.config.password) {
-				const credentials = await InputHandler.requestCredentials();
-				this.config.change(credentials);
-
-				if (!this.config.username || !this.config.password) {
-					throw new Error("Username or password not provided");
-				}
-			}
-			await this.login(this.config.username, this.config.password);
+		const { authToken, username, password } = this.config;
+		// Without a terminal there is no one to ask; ensureLoggedIn() says so.
+		if (!authToken && (!username || !password) && process.stdin.isTTY) {
+			this.config.change(await InputHandler.requestCredentials());
 		}
+		await this.ensureLoggedIn();
 		if (!this.config.downloadDir) {
 			// In a non-interactive (headless/service) environment there is no
 			// TTY to answer a prompt — fall back to the default downloads
@@ -48,11 +63,37 @@ export default class LibroFmClient {
 	}
 
 	/** Logs in to the Libro.fm API and saves the authToken in the config. */
-	@LogMethod({ scope, message: "Logging in..." })
+	@LogMethod({ scope, message: "Logging in...", secretArgs: [0, 1] })
 	async login(username: string, password: string) {
-		const data = await APIHandler.fetchLoginData(username, password);
+		let data: TokenMetadata;
+		try {
+			data = await APIHandler.fetchLoginData(username, password);
+		} catch (error) {
+			if (!APIHandler.isRejectedLogin(error)) throw error;
+			throw new CredentialsError(
+				`Libro.fm rejected the username or password (${(error as Error).message}).`,
+				{ cause: error }
+			);
+		}
 		logger.verbose("Got new authToken", { fn: "LibroFmClient.login" });
 		this.config.change({ authToken: data.access_token });
+	}
+
+	/**
+	 * Log in again when the authToken is gone (a failed request clears it).
+	 * Never prompts: the background service has no terminal. Throws a
+	 * CredentialsError when retrying can't help.
+	 */
+	@LogMethod({ scope })
+	async ensureLoggedIn() {
+		if (this.config.authToken) return;
+		const { username, password } = this.config;
+		if (!username || !password) {
+			throw new CredentialsError(
+				"No username or password to log in with: set LIBROFM_USERNAME and LIBROFM_PASSWORD."
+			);
+		}
+		await this.login(username, password);
 	}
 
 	/** Fetches the library of audiobooks. */
@@ -131,8 +172,10 @@ export default class LibroFmClient {
 				.filter(Boolean)
 				.join(" - ");
 
+			// Each part comes from the API; keep it a single, safe path segment.
 			const filename = [authors, series, title]
 				.filter(Boolean)
+				.map((part) => safePathSegment(String(part)))
 				.join("/");
 
 			const [path, zipped_files] = await DownloadCLient.downloadFiles(
@@ -165,6 +208,22 @@ export default class LibroFmClient {
 		const library = await this.getLibrary();
 		const newBooks = this.state.findDiff(library);
 		return newBooks;
+	}
+
+	/**
+	 * Per-title listening history (added, last played, finished, position,
+	 * bookmarks), most recently played first. Optionally limited to ISBNs.
+	 */
+	@LogMethod({ scope, message: "Building listening history..." })
+	async getHistory(isbns: string[] = []): Promise<HistoryEntry[]> {
+		const library = await this.getLibrary();
+		const books = isbns.length
+			? isbns.map((isbn) => library[isbn]).filter(Boolean)
+			: Object.values(library);
+		return buildHistory(
+			books,
+			trackLengthsFromState(this.state.downloadedAudioBooks)
+		);
 	}
 
 	/** Fetches the download URLs for a specific book. */

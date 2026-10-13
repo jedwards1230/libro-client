@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 
 import { LOGS_DIR } from "./Directories";
+import { redact, registerSecret, scrubString } from "./Security";
 
 if (fs.existsSync(LOGS_DIR)) {
 	fs.readdirSync(LOGS_DIR).forEach((file) => {
@@ -15,8 +16,13 @@ const debugLogFile = path.join(LOGS_DIR, "debug.log");
 
 const DEBUG_MODE = process.env.DEBUG === "true";
 
-function getFormat(fileTransport: boolean = false) {
+export function getFormat(fileTransport: boolean = false) {
 	return format.printf(({ timestamp, level, message, fn, ...rest }) => {
+		// Never write credentials: LogMethod logs every argument, including
+		// passwords, tokens and signed download URLs.
+		message = redact(message) as typeof message;
+		rest = redact(rest) as typeof rest;
+
 		if (!DEBUG_MODE && !fileTransport && level.includes("info")) {
 			return message;
 		}
@@ -47,7 +53,7 @@ function getFormat(fileTransport: boolean = false) {
 			msg += `\n${key}: ${JSON.stringify(rest[key], null, 2)}`;
 		}
 
-		return msg;
+		return scrubString(msg);
 	});
 }
 
@@ -56,6 +62,8 @@ const logger = createLogger({
 
 	transports: [
 		new transports.Console({
+			// Keep stdout clean for piped output (`history --format csv > f`).
+			stderrLevels: ["error", "warn"],
 			format: format.combine(
 				format.errors({ stack: true }),
 				format.splat(),
@@ -71,6 +79,7 @@ const logger = createLogger({
 				getFormat(true)
 			),
 			filename: sillyLogFile,
+			options: { flags: "a", mode: 0o600 },
 			level: "silly",
 		}),
 		new transports.File({
@@ -81,6 +90,7 @@ const logger = createLogger({
 				getFormat(true)
 			),
 			filename: debugLogFile,
+			options: { flags: "a", mode: 0o600 },
 			level: "debug",
 		}),
 	],
@@ -90,6 +100,8 @@ type LogMethodOptions = {
 	level?: string;
 	scope?: string;
 	message?: string;
+	/** Positions of arguments that hold credentials; they are never logged. */
+	secretArgs?: number[];
 	[key: string]: any;
 };
 
@@ -98,9 +110,13 @@ type LogMethodOptions = {
  * Default level is "silly".
  * */
 export function LogMethod(
-	{ level = "silly", scope, message, ...rest }: LogMethodOptions = {
-		level: "silly",
-	}
+	{
+		level = "silly",
+		scope,
+		message,
+		secretArgs = [],
+		...rest
+	}: LogMethodOptions = { level: "silly" }
 ) {
 	return function (
 		target: any,
@@ -110,6 +126,7 @@ export function LogMethod(
 		const originalMethod = descriptor.value;
 
 		descriptor.value = function (...args: any[]) {
+			for (const index of secretArgs) registerSecret(args[index]);
 			const fn = scope || target.constructor.name;
 			if (message) {
 				logger.verbose(message, {

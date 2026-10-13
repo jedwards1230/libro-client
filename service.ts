@@ -1,7 +1,30 @@
-import LibroFmClient from "@/LibroFmClient";
+import LibroFmClient, { CredentialsError } from "@/LibroFmClient";
+import { parallelDownloads, pollIntervalMs } from "@/lib/Config";
+import { mapWithLimit } from "@/lib/Concurrency";
 
+// sysexits EX_CONFIG: a configuration problem that a restart won't fix.
+const EX_CONFIG = 78;
+
+/** Logging in again with the same credentials is pointless: stop instead. */
+const stopForCredentials = (error: CredentialsError): never => {
+	console.error(
+		`${error.message} Stopping the service: retrying with the same credentials won't help. ` +
+			"Fix LIBROFM_USERNAME / LIBROFM_PASSWORD (a username saved in data/config/config.json takes precedence) and start it again."
+	);
+	process.exit(EX_CONFIG);
+};
+
+// Read before logging in, so a bad setting fails right away.
+const pollInterval = pollIntervalMs();
+const downloadsAtOnce = parallelDownloads();
 const client = new LibroFmClient();
-await client.init();
+try {
+	await client.init();
+} catch (error) {
+	if (error instanceof CredentialsError) stopForCredentials(error);
+	// Network trouble or Libro.fm down: the first check logs in again.
+	console.error("Could not log in yet; trying again at the next check:", error);
+}
 
 const scanLibrary = async () => {
 	console.log("Checking for new books...");
@@ -26,38 +49,27 @@ const scanLibrary = async () => {
 
 let overwrite = false;
 let keepZip = false;
+// The scan already holds each new book from the library; no second fetch.
 const downloadBooks = async (newBooks: Audiobook[]) => {
-	const isbns = newBooks.map((book) => book.isbn);
 	console.log("Downloading new books...");
 
-	const audiobookLibrary = await client.getLibrary();
-
-	const promisedBooks = isbns.map(async (isbn) => {
-		console.log(`Searching library for ISBN: ${isbn}`);
-		const book = audiobookLibrary[isbn];
-		if (book) {
-			console.log(`Downloading: ${book.title}`);
-			try {
-				const filepath = await client.downloadBook(
-					book,
-					overwrite,
-					keepZip
-				);
-				if (filepath) {
-					console.log(`Downloaded ${book.title}`);
-					return book;
-				} else {
-					console.log("No new books downloaded");
-				}
-			} catch (error) {
-				console.error("An error occurred:", error);
+	// At most `downloadsAtOnce` books at a time (a first run on a large library
+	// would otherwise start them all at once); the next starts as soon as one
+	// finishes.
+	const books = await mapWithLimit(newBooks, downloadsAtOnce, async (book) => {
+		console.log(`Downloading: ${book.title}`);
+		try {
+			const filepath = await client.downloadBook(book, overwrite, keepZip);
+			if (filepath) {
+				console.log(`Downloaded ${book.title}`);
+				return book;
+			} else {
+				console.log("No new books downloaded");
 			}
-		} else {
-			console.warn(`No book found with ISBN: ${isbn}`);
+		} catch (error) {
+			console.error("An error occurred:", error);
 		}
 	});
-
-	const books = await Promise.all(promisedBooks);
 	const count = books.filter((book) => book).length;
 
 	console.log(`Downloaded ${count} new books.`);
@@ -73,17 +85,24 @@ const runService = async () => {
 	isRunning = true;
 
 	try {
+		// A failed request clears the token; log in again instead of failing
+		// every check until the service is restarted.
+		await client.ensureLoggedIn();
 		const newBooks = await scanLibrary();
 		if (newBooks.length > 0) await downloadBooks(newBooks);
 	} catch (error) {
+		if (error instanceof CredentialsError) stopForCredentials(error);
 		console.error("An error occurred:", error);
 	} finally {
 		isRunning = false;
 	}
 };
 
+console.log(
+	`Checking for new books every ${pollInterval / 60_000} minutes, downloading up to ${downloadsAtOnce} at a time.`
+);
 runService();
-setInterval(runService, 30000);
+setInterval(runService, pollInterval);
 
 process.on("SIGINT", () => {
 	console.log("Exiting...");

@@ -1,6 +1,7 @@
 import fs from "fs";
 import { STATE_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
+import { writePrivateFile } from "./Security";
 
 const scope = "State";
 
@@ -8,7 +9,11 @@ const scope = "State";
 export default class State {
 	downloadedAudioBooks: StateDataMap = {};
 
-	constructor(state?: Partial<State>) {
+	/** `statePath` defaults to `data/config/state.json`; tests pass a temp file. */
+	constructor(
+		state?: Partial<State>,
+		private readonly statePath: string = STATE_PATH
+	) {
 		this.load();
 		Object.assign(this, state);
 	}
@@ -49,12 +54,17 @@ export default class State {
 	@LogMethod({ scope })
 	private load(): StateDataMap | null {
 		let stateData: StateDataMap | null = null;
-		if (fs.existsSync(STATE_PATH)) {
-			const data = fs.readFileSync(STATE_PATH, "utf-8");
-			stateData = JSON.parse(data);
+		if (fs.existsSync(this.statePath)) {
+			const data = fs.readFileSync(this.statePath, "utf-8");
+			const parsed: StateDataMap = JSON.parse(data);
+			// Older versions created the file as `{"downloadedAudioBooks": {}}`,
+			// which then loaded as a bogus entry. It is never an ISBN.
+			delete parsed.downloadedAudioBooks;
+			stateData = parsed;
 			Object.assign(this, { downloadedAudioBooks: stateData });
 		} else {
-			fs.writeFileSync(STATE_PATH, JSON.stringify(this, null, 2));
+			// Same shape as every later write: the map itself.
+			this.save();
 		}
 
 		return stateData;
@@ -63,8 +73,8 @@ export default class State {
 	/** Saves the state to the file system */
 	@LogMethod({ scope })
 	private save(): void {
-		fs.writeFileSync(
-			STATE_PATH,
+		writePrivateFile(
+			this.statePath,
 			JSON.stringify(this.downloadedAudioBooks, null, 2)
 		);
 	}

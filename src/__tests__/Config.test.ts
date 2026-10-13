@@ -3,6 +3,13 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
+import {
+	DEFAULT_PARALLEL_DOWNLOADS,
+	DEFAULT_POLL_MINUTES,
+	parallelDownloads,
+	pollIntervalMs,
+} from "../lib/Config";
+
 describe("Config", () => {
 	let tmpDir: string;
 	let configPath: string;
@@ -43,10 +50,11 @@ describe("Config", () => {
 			},
 
 			save() {
-				const { username, password, authToken } = this;
+				// The password is never written to disk (see persistedConfig).
+				const { username, authToken } = this;
 				fs.writeFileSync(
 					configPath,
-					JSON.stringify({ username, password, authToken }, null, 2)
+					JSON.stringify({ username, authToken }, null, 2)
 				);
 			},
 		};
@@ -106,7 +114,7 @@ describe("Config", () => {
 	});
 
 	describe("persistence", () => {
-		test("load restores saved config", () => {
+		test("load restores saved config without the password", () => {
 			const config1 = createConfig();
 			config1.change({
 				username: "user@test.com",
@@ -114,10 +122,13 @@ describe("Config", () => {
 				authToken: "abc",
 			});
 
+			const saved = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+			expect(saved).not.toHaveProperty("password");
+
 			const config2 = createConfig();
 			config2.load();
 			expect(config2.username).toBe("user@test.com");
-			expect(config2.password).toBe("secret");
+			expect(config2.password).toBeUndefined();
 			expect(config2.authToken).toBe("abc");
 		});
 
@@ -142,6 +153,53 @@ describe("Config", () => {
 			});
 			expect(config.username).toBe("init-user");
 			expect(config.password).toBe("init-pass");
+		});
+	});
+
+	describe("pollIntervalMs", () => {
+		test("defaults to 15 minutes when unset or empty", () => {
+			expect(DEFAULT_POLL_MINUTES).toBe(15);
+			expect(pollIntervalMs(undefined)).toBe(15 * 60_000);
+			expect(pollIntervalMs("")).toBe(15 * 60_000);
+			expect(pollIntervalMs("  ")).toBe(15 * 60_000);
+		});
+
+		test("reads minutes, fractions included", () => {
+			expect(pollIntervalMs("60")).toBe(60 * 60_000);
+			expect(pollIntervalMs("0.5")).toBe(30_000);
+		});
+
+		test("rejects values that are not a positive number", () => {
+			for (const bad of ["0", "-5", "abc", "15m", "Infinity"]) {
+				expect(() => pollIntervalMs(bad)).toThrow("LIBROFM_POLL_MINUTES");
+			}
+		});
+
+		test("rejects intervals setInterval cannot hold", () => {
+			expect(pollIntervalMs("35791")).toBe(35791 * 60_000);
+			expect(() => pollIntervalMs("35792")).toThrow("at most 35791");
+		});
+	});
+
+	describe("parallelDownloads", () => {
+		test("defaults to 4 when unset or empty", () => {
+			expect(DEFAULT_PARALLEL_DOWNLOADS).toBe(4);
+			expect(parallelDownloads(undefined)).toBe(4);
+			expect(parallelDownloads("")).toBe(4);
+			expect(parallelDownloads("  ")).toBe(4);
+		});
+
+		test("reads a whole number", () => {
+			expect(parallelDownloads("1")).toBe(1);
+			expect(parallelDownloads("8")).toBe(8);
+		});
+
+		test("rejects values that are not a whole number of 1 or more", () => {
+			for (const bad of ["0", "-2", "2.5", "abc", "Infinity"]) {
+				expect(() => parallelDownloads(bad)).toThrow(
+					"LIBROFM_PARALLEL_DOWNLOADS"
+				);
+			}
 		});
 	});
 });

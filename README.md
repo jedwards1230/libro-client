@@ -52,6 +52,10 @@ Replace `[...isbns]` with the ISBN of the audiobook you want to download. You ca
 
 If you don't specify an ISBN, the tool will prompt you to select an audiobook from your library.
 
+A book only shows up in your download folder once it is complete. Its zip parts are streamed to a hidden `.libro-partial` folder inside the download folder, unpacked there, and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
+
+Downloads go straight to disk and are never held in memory whole, so memory use stays at a few tens of MB however large the book is. While a book downloads, the download folder needs free space for about twice its size (the zip parts plus the unpacked files).
+
 ### Check for new audiobooks
 
 To check for new audiobooks in your library, run the following command:
@@ -62,11 +66,41 @@ libro check
 
 This will print a list of new audiobooks to the console. You can also use the --json flag to output the data as JSON.
 
+### Listening history
+
+To see your listening history for each title, run:
+
+```bash
+libro history                                  # whole library, most recently played first
+libro history 9780593135204                    # one or more ISBNs
+libro history --format csv -o history.csv      # spreadsheet export
+libro history --format json -o history.json    # full detail, including every bookmark
+```
+
+For each title it shows:
+
+| Field | Meaning |
+| --- | --- |
+| `added_at` | When the title was added to your library |
+| `last_played_at` | When the app last synced a listening position (Libro.fm's `last_touched_at`) |
+| `finished` | Whether the app marked the title finished |
+| `track`, `track_seconds` | Current position: track number (from 1) and seconds into it |
+| `position_seconds`, `progress_percent` | Position from the start of the book; only for titles downloaded with this tool, since it needs the track lengths |
+| `duration_seconds` | Length of the book |
+| bookmarks | Count in text and CSV; the JSON has each bookmark's track, time, note and creation date |
+| `tags` | Your library tags |
+
+Libro.fm's API has no endpoint that returns individual listening sessions (the app uploads them but never reads them back), so the history is the latest state for each title, not a log of every session. Files written with `-o` are readable only by you. Use `-o` rather than `>` the first time you log in, so the login prompt doesn't end up in the file.
+
 ## Background service
 
-The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library.
+The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library. It downloads up to 4 new books at a time (`LIBROFM_PARALLEL_DOWNLOADS`), so the first run on a large library takes a while; checks that come due meanwhile are skipped.
 
 To run the service, you can use Docker or another process manager.
+
+Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When a request fails, the saved session token is dropped and the service logs in again with these before the next check. If Libro.fm is unreachable or answers with a server error, the service keeps trying at each check, also at startup.
+
+If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. A username saved in `data/config/config.json` by an earlier interactive login takes precedence over `LIBROFM_USERNAME`.
 
 ### Docker
 
@@ -92,7 +126,17 @@ You can set the following environment variables:
 DEBUG=true                          # enable debug-level logging (default: off)
 LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
+LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
+LIBROFM_PARALLEL_DOWNLOADS=4        # background service: new books downloaded at the same time (default: 4)
 ```
+
+### Where your credentials go
+
+- Your password is only sent to `https://libro.fm/oauth/token`. It is never written to disk: after
+  the first login, only your username and the session token are kept in `data/config/config.json`,
+  readable by your user only.
+- Logs in `data/logs/` redact passwords, tokens and signed download links.
+- The Docker image never includes `data/`; mount it as a volume (see `docker-compose.yml`).
 
 ## Contributing
 

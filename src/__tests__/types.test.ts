@@ -26,9 +26,10 @@ describe("Type definitions", () => {
 					narrators: ["Narrator 1"],
 					duration: 36000,
 					size_bytes: 500000000,
-					track_count: 12,
+					trackCount: 12,
 					parts_count: 2,
-					audio_language: "en",
+					audio_language_display: "English",
+					pdf_extras: [{ filename: "extras.pdf", size_bytes: 1024 }],
 				},
 				catalog_info: {
 					bookseller_pick: true,
@@ -37,8 +38,13 @@ describe("Type definitions", () => {
 				},
 				user_metadata: {
 					finished: true,
-					tags: ["fiction"],
-					bookmarks: [],
+					tags: [{ id: 1, name: "fiction" }],
+					bookmarks: [
+						{ uuid: "b1", track_index: 2, track_seconds: 61.5, note: "here" },
+					],
+					track_index: 2,
+					track_seconds: 61.5,
+					last_touched_at: "2026-10-01T12:00:00.000Z",
 				},
 			};
 			expect(book.audiobook_info?.narrators).toEqual(["Narrator 1"]);
@@ -84,7 +90,7 @@ describe("Type definitions", () => {
 				tracks: [
 					{
 						number: 1,
-						length_sec: 600,
+						length_msec: 600000,
 						chapter_title: "Introduction",
 						created_at: "2024-01-01",
 						updated_at: "2024-01-01",
