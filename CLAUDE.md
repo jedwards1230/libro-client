@@ -40,7 +40,7 @@ src/
 2. `LibroFmClient.init()` logs in via `APIHandler` if no authToken, saves token to config
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API
 4. `client.downloadBook()` -> `APIHandler.fetchDownloadMetadata()` -> `DownloadClient.downloadFiles()`
-5. `State` tracks downloaded ISBNs in `data/config/state.json`
+5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN → `StateData`
 
 ### External Dependencies
 
