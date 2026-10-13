@@ -6,6 +6,8 @@ import { hideBin } from "yargs/helpers";
 import LibroFmClient from "@/LibroFmClient";
 import InputHandler from "@/lib/InputHandler";
 import logger from "@/lib/Logger";
+import { toCsv, toJson, toText } from "@/lib/History";
+import { writePrivateFile } from "@/lib/Security";
 
 const SCRIPT_NAME = "libro";
 
@@ -155,6 +157,51 @@ const Command = yargs(hideBin(process.argv))
 			}
 		},
 	})
+	.command(
+		"history [isbns...]",
+		"Show listening history per title: added, last played, finished, position, bookmarks",
+		(yargs) =>
+			yargs
+				.positional("isbns", {
+					describe: "Limit to these ISBNs (default: whole library)",
+					type: "string",
+				})
+				.array("isbns")
+				.options({
+					format: {
+						describe: "Output format",
+						choices: ["text", "json", "csv"] as const,
+						default: "text" as const,
+					},
+					output: {
+						alias: "o",
+						describe: "Write to this file instead of stdout",
+						type: "string",
+					},
+				}),
+		async (argv) => {
+			const isbns = (argv.isbns ?? []).map(String);
+			const history = await client.getHistory(isbns);
+			for (const isbn of isbns) {
+				if (!history.some((entry) => entry.isbn === isbn)) {
+					logger.error(`No book found with ISBN: ${isbn}`, {
+						fn: "Command.history",
+					});
+				}
+			}
+
+			const render = { text: toText, json: toJson, csv: toCsv }[argv.format];
+			const text = render(history);
+			if (argv.output) {
+				// Personal data: keep the export readable only by this user.
+				writePrivateFile(argv.output, text);
+				logger.info(`Wrote ${history.length} titles to ${argv.output}`);
+			} else {
+				// Plain stdout (not the logger) so JSON/CSV can be piped.
+				process.stdout.write(text);
+			}
+		}
+	)
 	.demandCommand()
 	.parse();
 

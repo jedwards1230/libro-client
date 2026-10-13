@@ -62,6 +62,8 @@ const logger = createLogger({
 
 	transports: [
 		new transports.Console({
+			// Keep stdout clean for piped output (`history --format csv > f`).
+			stderrLevels: ["error", "warn"],
 			format: format.combine(
 				format.errors({ stack: true }),
 				format.splat(),
