@@ -62,6 +62,32 @@ libro check
 
 This will print a list of new audiobooks to the console. You can also use the --json flag to output the data as JSON.
 
+### Listening history
+
+To see your listening history for each title, run:
+
+```bash
+libro history                                  # whole library, most recently played first
+libro history 9780593135204                    # one or more ISBNs
+libro history --format csv -o history.csv      # spreadsheet export
+libro history --format json -o history.json    # full detail, including every bookmark
+```
+
+For each title it shows:
+
+| Field | Meaning |
+| --- | --- |
+| `added_at` | When the title was added to your library |
+| `last_played_at` | When the app last synced a listening position (Libro.fm's `last_touched_at`) |
+| `finished` | Whether the app marked the title finished |
+| `track`, `track_seconds` | Current position: track number (from 1) and seconds into it |
+| `position_seconds`, `progress_percent` | Position from the start of the book; only for titles downloaded with this tool, since it needs the track lengths |
+| `duration_seconds` | Length of the book |
+| bookmarks | Count in text and CSV; the JSON has each bookmark's track, time, note and creation date |
+| `tags` | Your library tags |
+
+Libro.fm's API has no endpoint that returns individual listening sessions (the app uploads them but never reads them back), so the history is the latest state for each title, not a log of every session. Files written with `-o` are readable only by you. Use `-o` rather than `>` the first time you log in, so the login prompt doesn't end up in the file.
+
 ## Background service
 
 The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library.
@@ -93,6 +119,14 @@ DEBUG=true                          # enable debug-level logging (default: off)
 LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 ```
+
+### Where your credentials go
+
+- Your password is only sent to `https://libro.fm/oauth/token`. It is never written to disk: after
+  the first login, only your username and the session token are kept in `data/config/config.json`,
+  readable by your user only.
+- Logs in `data/logs/` redact passwords, tokens and signed download links.
+- The Docker image never includes `data/`; mount it as a volume (see `docker-compose.yml`).
 
 ## Contributing
 

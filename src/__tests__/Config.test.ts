@@ -43,10 +43,11 @@ describe("Config", () => {
 			},
 
 			save() {
-				const { username, password, authToken } = this;
+				// The password is never written to disk (see persistedConfig).
+				const { username, authToken } = this;
 				fs.writeFileSync(
 					configPath,
-					JSON.stringify({ username, password, authToken }, null, 2)
+					JSON.stringify({ username, authToken }, null, 2)
 				);
 			},
 		};
@@ -106,7 +107,7 @@ describe("Config", () => {
 	});
 
 	describe("persistence", () => {
-		test("load restores saved config", () => {
+		test("load restores saved config without the password", () => {
 			const config1 = createConfig();
 			config1.change({
 				username: "user@test.com",
@@ -114,10 +115,13 @@ describe("Config", () => {
 				authToken: "abc",
 			});
 
+			const saved = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+			expect(saved).not.toHaveProperty("password");
+
 			const config2 = createConfig();
 			config2.load();
 			expect(config2.username).toBe("user@test.com");
-			expect(config2.password).toBe("secret");
+			expect(config2.password).toBeUndefined();
 			expect(config2.authToken).toBe("abc");
 		});
 

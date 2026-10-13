@@ -200,7 +200,7 @@ describe("DownloadClient", () => {
 				tracks: [
 					{
 						number: 1,
-						length_sec: 300,
+						length_msec: 300000,
 						chapter_title: "Chapter 1",
 						created_at: "2024-01-01",
 						updated_at: "2024-01-01",
