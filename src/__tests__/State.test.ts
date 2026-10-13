@@ -3,9 +3,11 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-// We need to mock Directories before importing State, since State imports
-// Directories at module level which creates directories as a side effect.
-// Instead, we'll test State logic by creating a temporary directory structure.
+import State from "../lib/State";
+
+// Most tests replicate State's logic in a plain object. The "state file" tests
+// use the real class with a temp state path; importing it creates the data/
+// directories and the logger, as the Logger and APIHandler suites already do.
 
 describe("State", () => {
 	let tmpDir: string;
@@ -214,6 +216,52 @@ describe("State", () => {
 			expect(state2.downloadedAudioBooks["111"].book.title).toBe(
 				"Persisted Book"
 			);
+		});
+	});
+
+	describe("state file", () => {
+		function readStateFile() {
+			return JSON.parse(fs.readFileSync(statePath, "utf-8"));
+		}
+
+		test("first run creates an empty map, private to the user", () => {
+			const state = new State(undefined, statePath);
+			expect(readStateFile()).toEqual({});
+			expect(fs.statSync(statePath).mode & 0o777).toBe(0o600);
+			expect(state.downloadedAudioBooks).toEqual({});
+		});
+
+		test("first run, save and reload keep the same shape", () => {
+			new State(undefined, statePath).addBook(makeStateData("111"));
+			expect(Object.keys(readStateFile())).toEqual(["111"]);
+
+			const reloaded = new State(undefined, statePath);
+			expect(Object.keys(reloaded.downloadedAudioBooks)).toEqual(["111"]);
+		});
+
+		test("drops the stray key from a file created by older versions", () => {
+			fs.writeFileSync(
+				statePath,
+				JSON.stringify({ downloadedAudioBooks: {} }, null, 2)
+			);
+			const state = new State(undefined, statePath);
+			expect(state.downloadedAudioBooks).toEqual({});
+			expect(state.hasBook("downloadedAudioBooks")).toBe(false);
+		});
+
+		test("keeps books in an affected file and saves it clean", () => {
+			const book = makeStateData("111");
+			fs.writeFileSync(
+				statePath,
+				JSON.stringify({ downloadedAudioBooks: {}, "111": book }, null, 2)
+			);
+			const state = new State(undefined, statePath);
+			expect(state.downloadedAudioBooks).toEqual({ "111": book });
+
+			state.addBook(makeStateData("222"));
+			const saved = readStateFile();
+			expect(saved.downloadedAudioBooks).toBeUndefined();
+			expect(Object.keys(saved).sort()).toEqual(["111", "222"]);
 		});
 	});
 });
