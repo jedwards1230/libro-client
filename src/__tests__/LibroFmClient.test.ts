@@ -8,8 +8,9 @@ import {
 	spyOn,
 } from "bun:test";
 
-import APIHandler from "../APIHandler";
-import LibroFmClient from "../LibroFmClient";
+import APIHandler, { ApiError } from "../APIHandler";
+import LibroFmClient, { CredentialsError } from "../LibroFmClient";
+import InputHandler from "../lib/InputHandler";
 import type Config from "../lib/Config";
 import type State from "../lib/State";
 
@@ -222,10 +223,100 @@ describe("LibroFmClient", () => {
 			const login = loginReturns("new-token");
 			const config = fakeConfig({ password: undefined });
 
-			await expect(makeClient(config).ensureLoggedIn()).rejects.toThrow(
-				"LIBROFM_PASSWORD"
-			);
+			const result = makeClient(config).ensureLoggedIn();
+			await expect(result).rejects.toThrow(CredentialsError);
+			await expect(result).rejects.toThrow("LIBROFM_PASSWORD");
 			expect(login).not.toHaveBeenCalled();
+		});
+
+		test("a rejected login is a CredentialsError", async () => {
+			spyOn(APIHandler, "fetchLoginData").mockRejectedValue(
+				new ApiError(401, "Unauthorized", "invalid_grant")
+			);
+			const config = fakeConfig();
+
+			const result = makeClient(config).ensureLoggedIn();
+			await expect(result).rejects.toThrow(CredentialsError);
+			await expect(result).rejects.toThrow(
+				"Libro.fm rejected the username or password (HTTP 401 Unauthorized: invalid_grant)."
+			);
+			expect(config.authToken).toBeUndefined();
+		});
+
+		test("other login failures are passed on to be retried", async () => {
+			for (const failure of [
+				new ApiError(503, "Service Unavailable"),
+				new ApiError(401, "Unauthorized"), // the ELB's empty 401
+				new TypeError("fetch failed"),
+			]) {
+				spyOn(APIHandler, "fetchLoginData").mockRejectedValue(failure);
+				const result = makeClient(fakeConfig()).ensureLoggedIn();
+				await expect(result).rejects.toBe(failure);
+				mock.restore();
+			}
+		});
+
+		describe("init", () => {
+			const ttyDescriptor = Object.getOwnPropertyDescriptor(
+				process.stdin,
+				"isTTY"
+			);
+			function setTTY(value: boolean) {
+				Object.defineProperty(process.stdin, "isTTY", {
+					value,
+					configurable: true,
+				});
+			}
+
+			afterEach(() => {
+				if (ttyDescriptor) {
+					Object.defineProperty(process.stdin, "isTTY", ttyDescriptor);
+				} else {
+					delete (process.stdin as { isTTY?: boolean }).isTTY;
+				}
+			});
+
+			test("without a terminal, missing credentials fail without a prompt", async () => {
+				setTTY(false);
+				const prompt = spyOn(InputHandler, "requestCredentials");
+				const login = loginReturns("new-token");
+
+				await expect(
+					makeClient(fakeConfig({ password: undefined })).init()
+				).rejects.toThrow(CredentialsError);
+				expect(prompt).not.toHaveBeenCalled();
+				expect(login).not.toHaveBeenCalled();
+			});
+
+			test("in a terminal, asks for missing credentials, then logs in", async () => {
+				setTTY(true);
+				const prompt = spyOn(
+					InputHandler,
+					"requestCredentials"
+				).mockResolvedValue({
+					username: "typed@example.com",
+					password: "typed-pass",
+				});
+				const login = loginReturns("new-token");
+				const config = fakeConfig({ username: undefined, password: undefined });
+
+				await makeClient(config).init();
+
+				expect(prompt).toHaveBeenCalledTimes(1);
+				expect(login).toHaveBeenCalledWith("typed@example.com", "typed-pass");
+				expect(config.authToken).toBe("new-token");
+			});
+
+			test("a rejected login stops init with a CredentialsError", async () => {
+				setTTY(false);
+				spyOn(APIHandler, "fetchLoginData").mockRejectedValue(
+					new ApiError(401, "Unauthorized", "invalid_grant")
+				);
+
+				await expect(makeClient(fakeConfig()).init()).rejects.toThrow(
+					CredentialsError
+				);
+			});
 		});
 
 		test("recovers after a failed library fetch clears the token", async () => {

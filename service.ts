@@ -1,12 +1,30 @@
-import LibroFmClient from "@/LibroFmClient";
+import LibroFmClient, { CredentialsError } from "@/LibroFmClient";
 import { parallelDownloads, pollIntervalMs } from "@/lib/Config";
 import { mapWithLimit } from "@/lib/Concurrency";
+
+// sysexits EX_CONFIG: a configuration problem that a restart won't fix.
+const EX_CONFIG = 78;
+
+/** Logging in again with the same credentials is pointless: stop instead. */
+const stopForCredentials = (error: CredentialsError): never => {
+	console.error(
+		`${error.message} Stopping the service: retrying with the same credentials won't help. ` +
+			"Fix LIBROFM_USERNAME / LIBROFM_PASSWORD (a username saved in data/config/config.json takes precedence) and start it again."
+	);
+	process.exit(EX_CONFIG);
+};
 
 // Read before logging in, so a bad setting fails right away.
 const pollInterval = pollIntervalMs();
 const downloadsAtOnce = parallelDownloads();
 const client = new LibroFmClient();
-await client.init();
+try {
+	await client.init();
+} catch (error) {
+	if (error instanceof CredentialsError) stopForCredentials(error);
+	// Network trouble or Libro.fm down: the first check logs in again.
+	console.error("Could not log in yet; trying again at the next check:", error);
+}
 
 const scanLibrary = async () => {
 	console.log("Checking for new books...");
@@ -73,6 +91,7 @@ const runService = async () => {
 		const newBooks = await scanLibrary();
 		if (newBooks.length > 0) await downloadBooks(newBooks);
 	} catch (error) {
+		if (error instanceof CredentialsError) stopForCredentials(error);
 		console.error("An error occurred:", error);
 	} finally {
 		isRunning = false;

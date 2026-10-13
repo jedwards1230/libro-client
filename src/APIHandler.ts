@@ -2,6 +2,24 @@ import logger, { LogMethod } from "./lib/Logger";
 
 const scope = "APIHandler";
 
+/** A failed Libro.fm request, with the OAuth/API error code if the server sent one. */
+export class ApiError extends Error {
+	constructor(
+		readonly status: number | undefined,
+		readonly statusText: string | undefined,
+		/** `error` from a JSON body, e.g. `invalid_grant`. */
+		readonly code?: string,
+		readonly description?: string
+	) {
+		const http = [status && `HTTP ${status}`, statusText]
+			.filter(Boolean)
+			.join(" ");
+		const api = code && (description ? `${code} - ${description}` : code);
+		super([http, api].filter(Boolean).join(": ") || "Request failed");
+		this.name = "ApiError";
+	}
+}
+
 // Libro.fm has no public API; endpoints and required headers are reverse-engineered
 // from the official Android app (fm.libro.librofm). The most current source is the
 // weekly APK probe in https://github.com/Bookclerk/bookclerk
@@ -85,6 +103,21 @@ export default class APIHandler {
 	}
 
 	/**
+	 * True when /oauth/token turned the credentials down: the server answered
+	 * with an OAuth error code (bad credentials get a JSON 401 from nginx).
+	 * Not the ELB's empty 401 for a missing X-LibroFm-AppVer, and not a 429
+	 * or 5xx: those are worth retrying.
+	 */
+	static isRejectedLogin(error: unknown): boolean {
+		return (
+			error instanceof ApiError &&
+			error.code !== undefined &&
+			(error.status === undefined ||
+				(error.status < 500 && error.status !== 429))
+		);
+	}
+
+	/**
 	 * The app's DTOs type isbn as a long and the API has sent both strings and
 	 * numbers; keep it a string so it works as an AudiobookMap/State key.
 	 */
@@ -99,12 +132,30 @@ export default class APIHandler {
 		opts: RequestInit
 	): Promise<T> {
 		const response = await fetch(url, opts);
-		this.statusCheck(response);
+		if (!response.ok) throw await this.httpError(response);
 
 		const data: any = await response.json();
-		this.errorCheck(data);
+		this.errorCheck(data, response);
 
 		return data;
+	}
+
+	/** An ApiError for a non-2xx response, keeping the error code of a JSON body. */
+	private static async httpError(response: Response): Promise<ApiError> {
+		let body: any;
+		try {
+			body = await response.json();
+		} catch {
+			// Empty or not JSON, like the ELB's bare 401.
+		}
+		return new ApiError(
+			response.status,
+			response.statusText,
+			typeof body?.error === "string" ? body.error : undefined,
+			typeof body?.error_description === "string"
+				? body.error_description
+				: undefined
+		);
 	}
 
 	/** General request headers. */
@@ -118,20 +169,20 @@ export default class APIHandler {
 	});
 
 	@LogMethod({ scope })
-	private static statusCheck(response: Response) {
-		if (!response.ok) {
-			throw new Error(response.statusText);
-		}
-	}
-
-	@LogMethod({ scope })
-	private static errorCheck(data: any) {
+	private static errorCheck(data: any, response: Response) {
 		if (Object.keys(data).length === 0) {
 			throw new Error("Empty response");
 		}
 
 		if ("error" in data) {
-			throw new Error(data.error);
+			throw new ApiError(
+				response.status,
+				response.statusText,
+				typeof data.error === "string"
+					? data.error
+					: JSON.stringify(data.error),
+				data.error_description
+			);
 		}
 	}
 }

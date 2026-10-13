@@ -3,7 +3,7 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
-import LibroFmClient from "@/LibroFmClient";
+import LibroFmClient, { CredentialsError } from "@/LibroFmClient";
 import InputHandler from "@/lib/InputHandler";
 import logger from "@/lib/Logger";
 import { toCsv, toJson, toText } from "@/lib/History";
@@ -12,7 +12,13 @@ import { writePrivateFile } from "@/lib/Security";
 const SCRIPT_NAME = "libro";
 
 const client = new LibroFmClient();
-await client.init();
+try {
+	await client.init();
+} catch (error) {
+	if (!(error instanceof CredentialsError)) throw error;
+	logger.error(error.message);
+	process.exit(1);
+}
 
 const Command = yargs(hideBin(process.argv))
 	.scriptName(SCRIPT_NAME)

@@ -1,5 +1,13 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
-import APIHandler from "../APIHandler";
+import {
+	describe,
+	test,
+	expect,
+	mock,
+	beforeEach,
+	afterEach,
+	spyOn,
+} from "bun:test";
+import APIHandler, { ApiError } from "../APIHandler";
 
 describe("APIHandler", () => {
 	describe("getHeaders", () => {
@@ -258,6 +266,78 @@ describe("APIHandler", () => {
 				"9781234567897"
 			);
 			expect(result.isbn).toBe("9781234567897");
+		});
+	});
+
+	describe("isRejectedLogin", () => {
+		afterEach(() => {
+			mock.restore();
+		});
+
+		/** The error fetchLoginData throws for this response. */
+		async function loginError(response: Response | Error): Promise<unknown> {
+			const fetchSpy = spyOn(globalThis, "fetch");
+			if (response instanceof Error) fetchSpy.mockRejectedValue(response);
+			else fetchSpy.mockResolvedValue(response);
+			try {
+				await APIHandler.fetchLoginData("reader@example.com", "wrong");
+			} catch (error) {
+				return error;
+			}
+			throw new Error("login did not fail");
+		}
+
+		const json = (body: object, status: number) =>
+			new Response(JSON.stringify(body), {
+				status,
+				headers: { "Content-Type": "application/json" },
+			});
+
+		test("a JSON 401 with an OAuth error is a rejected login", async () => {
+			const error = await loginError(
+				json(
+					{
+						error: "invalid_grant",
+						error_description: "The provided authorization grant is invalid",
+					},
+					401
+				)
+			);
+			expect(error).toBeInstanceOf(ApiError);
+			expect(error).toMatchObject({ status: 401, code: "invalid_grant" });
+			expect((error as Error).message).toContain("HTTP 401");
+			expect((error as Error).message).toContain("invalid_grant");
+			expect(APIHandler.isRejectedLogin(error)).toBe(true);
+		});
+
+		test("so is a JSON 400, or an error in a 200 body", async () => {
+			for (const status of [400, 200]) {
+				const error = await loginError(json({ error: "invalid_grant" }, status));
+				expect(error).toMatchObject({ status, code: "invalid_grant" });
+				expect(APIHandler.isRejectedLogin(error)).toBe(true);
+				mock.restore();
+			}
+		});
+
+		test("the ELB's empty 401 (missing app-version header) is not", async () => {
+			const error = await loginError(new Response(null, { status: 401 }));
+			expect(error).toMatchObject({ status: 401, code: undefined });
+			expect(APIHandler.isRejectedLogin(error)).toBe(false);
+		});
+
+		test("429 and 5xx are not, even with an error code", async () => {
+			for (const status of [429, 500, 503]) {
+				const error = await loginError(
+					json({ error: "temporarily_unavailable" }, status)
+				);
+				expect(APIHandler.isRejectedLogin(error)).toBe(false);
+				mock.restore();
+			}
+		});
+
+		test("a network failure is not", async () => {
+			const error = await loginError(new TypeError("fetch failed"));
+			expect(APIHandler.isRejectedLogin(error)).toBe(false);
 		});
 	});
 });

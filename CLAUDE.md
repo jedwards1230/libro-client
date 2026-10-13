@@ -41,7 +41,10 @@ src/
 1. `Config` loads credentials from env (`LIBROFM_USERNAME`, `LIBROFM_PASSWORD`) or `data/config/config.json`
 2. `LibroFmClient.init()` logs in via `APIHandler` if no authToken, saves token to config.
    A failed library fetch clears the token; the service calls `ensureLoggedIn()` before each
-   check to log in again from the configured credentials (never prompts)
+   check to log in again from the configured credentials (never prompts). Missing or rejected
+   credentials throw `CredentialsError` (see `APIHandler.isRejectedLogin`): the service exits
+   with status 78 and the CLI prints the message. Network errors, 429/5xx and the ELB gate's
+   empty 401 are thrown as is and retried at the next check
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API
 4. `client.downloadBook()` -> `APIHandler.fetchDownloadMetadata()` -> `DownloadClient.downloadFiles()`
 5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN → `StateData`
