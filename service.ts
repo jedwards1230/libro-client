@@ -1,8 +1,10 @@
 import LibroFmClient from "@/LibroFmClient";
-import { pollIntervalMs } from "@/lib/Config";
+import { parallelDownloads, pollIntervalMs } from "@/lib/Config";
+import { mapWithLimit } from "@/lib/Concurrency";
 
-// Read before logging in, so a bad LIBROFM_POLL_MINUTES fails right away.
+// Read before logging in, so a bad setting fails right away.
 const pollInterval = pollIntervalMs();
+const downloadsAtOnce = parallelDownloads();
 const client = new LibroFmClient();
 await client.init();
 
@@ -33,7 +35,10 @@ let keepZip = false;
 const downloadBooks = async (newBooks: Audiobook[]) => {
 	console.log("Downloading new books...");
 
-	const promisedBooks = newBooks.map(async (book) => {
+	// At most `downloadsAtOnce` books at a time (a first run on a large library
+	// would otherwise start them all at once); the next starts as soon as one
+	// finishes.
+	const books = await mapWithLimit(newBooks, downloadsAtOnce, async (book) => {
 		console.log(`Downloading: ${book.title}`);
 		try {
 			const filepath = await client.downloadBook(book, overwrite, keepZip);
@@ -47,8 +52,6 @@ const downloadBooks = async (newBooks: Audiobook[]) => {
 			console.error("An error occurred:", error);
 		}
 	});
-
-	const books = await Promise.all(promisedBooks);
 	const count = books.filter((book) => book).length;
 
 	console.log(`Downloaded ${count} new books.`);
@@ -76,7 +79,9 @@ const runService = async () => {
 	}
 };
 
-console.log(`Checking for new books every ${pollInterval / 60_000} minutes.`);
+console.log(
+	`Checking for new books every ${pollInterval / 60_000} minutes, downloading up to ${downloadsAtOnce} at a time.`
+);
 runService();
 setInterval(runService, pollInterval);
 

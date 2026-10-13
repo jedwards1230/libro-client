@@ -43,6 +43,28 @@ export function pollIntervalMs(
 	return ms;
 }
 
+/** New books the background service downloads at the same time. */
+export const DEFAULT_PARALLEL_DOWNLOADS = 4;
+
+/**
+ * How many new books the background service downloads at once: the
+ * LIBROFM_PARALLEL_DOWNLOADS env var (a whole number, 1 or more), or 4 if unset.
+ */
+export function parallelDownloads(
+	value: string | undefined = process.env.LIBROFM_PARALLEL_DOWNLOADS
+): number {
+	if (value === undefined || value.trim() === "") {
+		return DEFAULT_PARALLEL_DOWNLOADS;
+	}
+	const count = Number(value);
+	if (!Number.isInteger(count) || count < 1) {
+		throw new Error(
+			`LIBROFM_PARALLEL_DOWNLOADS must be a whole number of 1 or more, got "${value}"`
+		);
+	}
+	return count;
+}
+
 /** Configuration for the app */
 export default class Config {
 	username: string | undefined;
