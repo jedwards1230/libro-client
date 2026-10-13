@@ -16,8 +16,11 @@ const scope = "LibroFmClient";
 
 /** Client for the Libro.fm API. */
 export default class LibroFmClient {
-	config = new Config();
-	state = new State();
+	/** `config` and `state` default to the files in data/config/; tests pass fakes. */
+	constructor(
+		public config: Config = new Config(),
+		public state: State = new State()
+	) {}
 
 	/**
 	 * Initialize the client.
@@ -59,6 +62,22 @@ export default class LibroFmClient {
 		const data = await APIHandler.fetchLoginData(username, password);
 		logger.verbose("Got new authToken", { fn: "LibroFmClient.login" });
 		this.config.change({ authToken: data.access_token });
+	}
+
+	/**
+	 * Log in again when the authToken is gone (a failed request clears it).
+	 * Never prompts: the background service has no terminal.
+	 */
+	@LogMethod({ scope })
+	async ensureLoggedIn() {
+		if (this.config.authToken) return;
+		const { username, password } = this.config;
+		if (!username || !password) {
+			throw new Error(
+				"Not logged in, and no credentials to log in again: set LIBROFM_USERNAME and LIBROFM_PASSWORD"
+			);
+		}
+		await this.login(username, password);
 	}
 
 	/** Fetches the library of audiobooks. */

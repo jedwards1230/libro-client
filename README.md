@@ -94,6 +94,8 @@ The tool can also be run as a background service. This is useful if you want to 
 
 To run the service, you can use Docker or another process manager.
 
+Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When a request fails, the saved session token is dropped and the service logs in again with these before the next check. Without them it can't log in again and keeps reporting "Not logged in" until you restart it.
+
 ### Docker
 
 To run the service using Docker, use the following command:

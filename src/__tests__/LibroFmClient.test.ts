@@ -1,8 +1,21 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import {
+	describe,
+	test,
+	expect,
+	mock,
+	beforeEach,
+	afterEach,
+	spyOn,
+} from "bun:test";
+
+import APIHandler from "../APIHandler";
+import LibroFmClient from "../LibroFmClient";
+import type Config from "../lib/Config";
+import type State from "../lib/State";
 
 describe("LibroFmClient", () => {
-	// Test the client logic patterns without importing the module directly
-	// (which triggers side effects from Config/State/Directories).
+	// Most tests replicate the client logic. The "re-login" tests use the real
+	// client with a fake config and state, so no file in data/config is touched.
 
 	describe("getLibrary pagination logic", () => {
 		test("fetches all pages and combines audiobooks", async () => {
@@ -151,6 +164,93 @@ describe("LibroFmClient", () => {
 
 			expect(newBooks).toHaveLength(1);
 			expect(newBooks[0].isbn).toBe("003");
+		});
+	});
+
+	describe("re-login", () => {
+		function fakeConfig(initial: Partial<Config> = {}) {
+			return {
+				username: "reader@example.com",
+				password: "hunter22",
+				authToken: undefined,
+				downloadDir: "/tmp/libro-downloads",
+				change(update: Partial<Config>) {
+					Object.assign(this, update);
+				},
+				...initial,
+			} as unknown as Config;
+		}
+
+		function makeClient(config: Config) {
+			return new LibroFmClient(config, {} as State);
+		}
+
+		function loginReturns(token: string) {
+			return spyOn(APIHandler, "fetchLoginData").mockResolvedValue({
+				access_token: token,
+				token_type: "Bearer",
+				created_at: 0,
+			});
+		}
+
+		afterEach(() => {
+			mock.restore();
+		});
+
+		test("keeps an existing token", async () => {
+			const login = loginReturns("new-token");
+			const config = fakeConfig({ authToken: "old-token" });
+
+			await makeClient(config).ensureLoggedIn();
+
+			expect(login).not.toHaveBeenCalled();
+			expect(config.authToken).toBe("old-token");
+		});
+
+		test("logs in again with the configured credentials", async () => {
+			const login = loginReturns("new-token");
+			const config = fakeConfig();
+
+			await makeClient(config).ensureLoggedIn();
+
+			expect(login).toHaveBeenCalledTimes(1);
+			expect(login).toHaveBeenCalledWith("reader@example.com", "hunter22");
+			expect(config.authToken).toBe("new-token");
+		});
+
+		test("fails without credentials instead of prompting", async () => {
+			const login = loginReturns("new-token");
+			const config = fakeConfig({ password: undefined });
+
+			await expect(makeClient(config).ensureLoggedIn()).rejects.toThrow(
+				"LIBROFM_PASSWORD"
+			);
+			expect(login).not.toHaveBeenCalled();
+		});
+
+		test("recovers after a failed library fetch clears the token", async () => {
+			loginReturns("new-token");
+			const fetchLibrary = spyOn(APIHandler, "fetchLibrary")
+				.mockRejectedValueOnce(new Error("Service Unavailable"))
+				.mockResolvedValue({
+					page: 1,
+					total_pages: 1,
+					audiobooks: [{ isbn: "001", title: "Book 1" }],
+					tags: [],
+				});
+			const config = fakeConfig({ authToken: "old-token" });
+			const client = makeClient(config);
+
+			// First check: the fetch fails and the token is dropped.
+			expect(await client.getLibrary()).toEqual({});
+			expect(config.authToken).toBeUndefined();
+			await expect(client.getLibrary()).rejects.toThrow("Not logged in");
+
+			// Next check: log in again, then the library loads.
+			await client.ensureLoggedIn();
+			const library = await client.getLibrary();
+			expect(Object.keys(library)).toEqual(["001"]);
+			expect(fetchLibrary).toHaveBeenLastCalledWith("new-token", 1);
 		});
 	});
 });
