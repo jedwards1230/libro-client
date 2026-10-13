@@ -98,7 +98,9 @@ The tool can also be run as a background service. This is useful if you want to 
 
 To run the service, you can use Docker or another process manager.
 
-Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When a request fails, the saved session token is dropped and the service logs in again with these before the next check. Without them it can't log in again and keeps reporting "Not logged in" until you restart it.
+Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When a request fails, the saved session token is dropped and the service logs in again with these before the next check. If Libro.fm is unreachable or answers with a server error, the service keeps trying at each check, also at startup.
+
+If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. A username saved in `data/config/config.json` by an earlier interactive login takes precedence over `LIBROFM_USERNAME`.
 
 ### Docker
 
