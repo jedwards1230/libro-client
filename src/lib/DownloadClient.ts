@@ -1,7 +1,10 @@
 import path from "path";
 import fs from "fs";
 import { createHash, randomBytes } from "crypto";
-import JSZip from "jszip";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import type { ReadableStream } from "stream/web";
+import yauzl from "yauzl";
 
 import APIHandler from "../APIHandler";
 import logger, { LogMethod } from "./Logger";
@@ -39,35 +42,55 @@ export default class DownloadCLient {
 			);
 		}
 
-		const buffers = await Promise.all(
-			urls.map((url) => DownloadCLient.download(url, authToken))
-		);
-		const zipped_files =
-			keepZip &&
-			(await Promise.all(
-				buffers.map((buffer, idx) =>
-					DownloadCLient.save(buffer, `/${filename}-${idx}.zip`)
-				)
-			));
-
-		// Unpack into a staging folder, then move the book into place with
-		// renames only: a failed or interrupted download never leaves a partial
-		// book in the download directory.
+		// Stream each part to disk, unpack the parts into a staging folder, then
+		// move the book into place with renames only. Nothing is held in memory
+		// whole, so memory use stays small whatever the book's size, and a
+		// failed or interrupted download never leaves a partial book in the
+		// download directory.
 		const staging = DownloadCLient.stagingPath(baseDir, filename);
+		const book = path.join(staging, "book");
 		// Left behind by an interrupted attempt at the same book.
 		fs.rmSync(staging, { recursive: true, force: true });
 		try {
+			fs.mkdirSync(book, { recursive: true });
+			// Kept zips go straight to the cache; others live in staging.
+			const zips = urls.map((_, idx) =>
+				keepZip
+					? path.join(CACHE_DIR, `${filename}-${idx}.zip`)
+					: path.join(staging, `part-${idx}.zip`)
+			);
+			// The first failure stops the other parts, and staging is only
+			// removed once every download has stopped writing to it.
+			const abort = new AbortController();
+			let failure: { error: unknown } | undefined;
+			await Promise.all(
+				urls.map(async (url, idx) => {
+					try {
+						await DownloadCLient.download(
+							url,
+							authToken,
+							zips[idx],
+							abort.signal
+						);
+					} catch (error) {
+						failure ??= { error };
+						abort.abort();
+					}
+				})
+			);
+			if (failure) throw failure.error;
+
 			// In part order, so a later part wins a name clash, as before.
-			for (const buffer of buffers) {
-				await DownloadCLient.unzip(buffer, staging);
+			for (const zip of zips) {
+				await DownloadCLient.unzip(zip, book);
 			}
-			DownloadCLient.moveIntoPlace(staging, finalPath);
+			DownloadCLient.moveIntoPlace(book, finalPath);
+
+			return [finalPath, keepZip && zips];
 		} finally {
 			fs.rmSync(staging, { recursive: true, force: true });
 			DownloadCLient.removeIfEmpty(path.dirname(staging));
 		}
-
-		return [finalPath, zipped_files];
 	}
 
 	/**
@@ -96,21 +119,24 @@ export default class DownloadCLient {
 		);
 	}
 
-	/** Downloads a file from a URL and returns the data as a Uint8Array */
+	/**
+	 * Streams a URL to `file`, through a temp file renamed into place when the
+	 * download is complete. Only a small buffer is held in memory.
+	 */
 	@LogMethod({ scope, message: "Downloading file...", secretArgs: [1] })
 	private static async download(
 		url: string,
-		authToken: string
-	): Promise<ArrayBuffer> {
+		authToken: string,
+		file: string,
+		signal?: AbortSignal
+	): Promise<void> {
+		const tmp = DownloadCLient.tempPathFor(file);
 		try {
-			var opts = {};
 			// Only libro.fm itself gets the bearer token; part URLs on a CDN
 			// (or a lookalike such as evillibro.fm) are fetched without it.
-			if (isLibroFmUrl(url)) {
-				opts = {
-					headers: APIHandler.getHeaders(authToken),
-				};
-			}
+			const opts = isLibroFmUrl(url)
+				? { headers: APIHandler.getHeaders(authToken), signal }
+				: { signal };
 
 			const response = await fetch(url, opts);
 			// An error page (e.g. an expired signed URL) is not a zip.
@@ -119,81 +145,60 @@ export default class DownloadCLient {
 					`Download failed: HTTP ${response.status} ${response.statusText}`.trim()
 				);
 			}
-			const buffer = await response.arrayBuffer();
+			if (!response.body) throw new Error("Download failed: empty response");
 
-			return buffer;
+			fs.mkdirSync(path.dirname(file), { recursive: true });
+			// Rejects if the connection drops before the advertised length.
+			await pipeline(
+				Readable.fromWeb(response.body as ReadableStream),
+				fs.createWriteStream(tmp),
+				{ signal }
+			);
+			fs.renameSync(tmp, file);
 		} catch (error) {
+			fs.rmSync(tmp, { force: true });
 			logger.error({ error, fn: "DownloadClient.download" });
 			throw error;
 		}
 	}
 
-	/** Saves a Uint8Array to a file and returns the path */
-	@LogMethod({ scope, message: "Saving zip file to filesystem..." })
-	static async save(buffer: ArrayBuffer, filename: string): Promise<string> {
-		const data = new Uint8Array(buffer);
-		try {
-			const outputPath = path.join(CACHE_DIR, filename);
-			// The book's author/series folders may not exist in the cache yet.
-			fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-			DownloadCLient.writeFileAtomic(outputPath, data);
-			return outputPath;
-		} catch (error) {
-			logger.error({ error, fn: "DownloadClient.save" });
-			throw error;
-		}
-	}
-
-	/** Unzips a file into a directory */
+	/**
+	 * Unzips a zip file into a directory, one entry at a time, streaming each
+	 * entry from the zip on disk to its file.
+	 */
 	@LogMethod({ scope, message: "Unzipping file to filesystem..." })
-	static async unzip(
-		buffer: ArrayBuffer,
-		outputPath: string
-	): Promise<string> {
+	static async unzip(zipPath: string, outputPath: string): Promise<string> {
+		let zip: yauzl.ZipFile | undefined;
 		try {
-			const zip = new JSZip();
+			fs.mkdirSync(outputPath, { recursive: true });
+			// yauzl rejects entry names that are absolute or contain `..`, and
+			// checks each entry's size against the zip's directory.
+			zip = await yauzl.openPromise(zipPath);
+			for await (const entry of zip.eachEntry()) {
+				// Directory entries: their files create the folders they need.
+				if (entry.fileName.endsWith("/")) continue;
 
-			const directory = await zip.loadAsync(buffer);
-
-			if (!fs.existsSync(outputPath)) {
-				fs.mkdirSync(outputPath, { recursive: true });
-			}
-
-			const filePromises: Promise<void>[] = [];
-			directory.forEach((relativePath, file) => {
-				if (!file.dir) {
-					const filePromise = file
-						.async("nodebuffer")
-						.then((content) => {
-							const filePath = path.join(
-								outputPath,
-								relativePath
-							);
-							// Zip-slip guard: never write outside the extraction dir.
-							if (!isWithin(outputPath, filePath)) {
-								logger.warn(
-									`Skipping unsafe zip entry: ${relativePath}`,
-									{ fn: "DownloadClient.unzip" }
-								);
-								return;
-							}
-							const fileDir = path.dirname(filePath);
-							if (!fs.existsSync(fileDir)) {
-								fs.mkdirSync(fileDir, { recursive: true });
-							}
-							fs.writeFileSync(filePath, content);
-						});
-					filePromises.push(filePromise);
+				const filePath = path.join(outputPath, entry.fileName);
+				// Zip-slip guard: never write outside the extraction dir.
+				if (!isWithin(outputPath, filePath)) {
+					logger.warn(`Skipping unsafe zip entry: ${entry.fileName}`, {
+						fn: "DownloadClient.unzip",
+					});
+					continue;
 				}
-			});
-
-			// Wait for all files to be written
-			await Promise.all(filePromises);
+				fs.mkdirSync(path.dirname(filePath), { recursive: true });
+				await pipeline(
+					await zip.openReadStreamPromise(entry),
+					fs.createWriteStream(filePath)
+				);
+			}
 
 			return outputPath;
 		} catch (error) {
 			logger.error({ error, fn: "DownloadClient.unzip" });
 			throw error;
+		} finally {
+			zip?.close();
 		}
 	}
 
@@ -220,12 +225,18 @@ export default class DownloadCLient {
 		}
 	}
 
+	/** Hidden temp file next to `file`, for writing it and renaming it over. */
+	private static tempPathFor(file: string): string {
+		const suffix = randomBytes(6).toString("hex");
+		return path.join(
+			path.dirname(file),
+			`.${path.basename(file)}.${suffix}.tmp`
+		);
+	}
+
 	/** Write `data` to a temp file next to `file`, then rename it over `file`. */
 	private static writeFileAtomic(file: string, data: string | Uint8Array) {
-		const tmp = path.join(
-			path.dirname(file),
-			`.${path.basename(file)}.${randomBytes(6).toString("hex")}.tmp`
-		);
+		const tmp = DownloadCLient.tempPathFor(file);
 		try {
 			fs.writeFileSync(tmp, data);
 			fs.renameSync(tmp, file);
