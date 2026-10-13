@@ -1,9 +1,23 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import {
+	describe,
+	test,
+	expect,
+	beforeEach,
+	afterEach,
+	mock,
+	spyOn,
+} from "bun:test";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import JSZip from "jszip";
 
+import DownloadClient from "../lib/DownloadClient";
+import { CACHE_DIR } from "../lib/Directories";
+
+// The "save", "unzip" and "saveMetadata" tests replicate the logic; the
+// "downloadFiles" and "atomic writes" tests run the real client with fetch
+// stubbed, writing into a temp download directory.
 describe("DownloadClient", () => {
 	let tmpDir: string;
 	let cacheDir: string;
@@ -89,101 +103,249 @@ describe("DownloadClient", () => {
 		});
 	});
 
-	describe("mergeDirectories", () => {
-		// Replicate the mergeDirectories logic from DownloadClient
-		function mergeDirectories(src: string[], dest: string): void {
-			if (!fs.existsSync(dest)) {
-				fs.mkdirSync(dest, { recursive: true });
-			}
+	describe("downloadFiles", () => {
+		const book = "Author/Series/Title";
 
-			for (const dir of src) {
-				fs.cpSync(dir, dest, { recursive: true });
-				fs.rmSync(dir, { recursive: true, force: true });
+		async function zipOf(files: Record<string, string>) {
+			const zip = new JSZip();
+			for (const [name, content] of Object.entries(files)) {
+				zip.file(name, content);
 			}
+			return zip.generateAsync({ type: "arraybuffer" });
 		}
 
-		test("merges files from multiple source directories", () => {
-			const src1 = path.join(cacheDir, "part-0");
-			const src2 = path.join(cacheDir, "part-1");
-			const dest = path.join(downloadDir, "merged");
+		/** Serve `responses[url]`: a zip buffer, or a ready-made Response. */
+		function serve(responses: Record<string, ArrayBuffer | Response>) {
+			return spyOn(globalThis, "fetch").mockImplementation((async (
+				url: string
+			) => {
+				const body = responses[url];
+				return body instanceof Response ? body : new Response(body.slice(0));
+			}) as unknown as typeof fetch);
+		}
 
-			fs.mkdirSync(src1);
-			fs.mkdirSync(src2);
-			fs.writeFileSync(path.join(src1, "track01.mp3"), "audio1");
-			fs.writeFileSync(path.join(src2, "track02.mp3"), "audio2");
+		/** Every file under `dir`, relative to it, sorted. */
+		function files(dir: string): string[] {
+			return (fs.readdirSync(dir, { recursive: true }) as string[])
+				.filter((f) => fs.statSync(path.join(dir, f)).isFile())
+				.sort();
+		}
 
-			mergeDirectories([src1, src2], dest);
+		const read = (...parts: string[]) =>
+			fs.readFileSync(path.join(downloadDir, book, ...parts), "utf-8");
 
-			expect(fs.existsSync(path.join(dest, "track01.mp3"))).toBe(true);
-			expect(fs.existsSync(path.join(dest, "track02.mp3"))).toBe(true);
-			expect(
-				fs.readFileSync(path.join(dest, "track01.mp3"), "utf-8")
-			).toBe("audio1");
+		const staging = () =>
+			path.join(downloadDir, DownloadClient.stagingDirName);
+
+		afterEach(() => {
+			mock.restore();
 		});
 
-		test("creates destination directory if it does not exist", () => {
-			const src = path.join(cacheDir, "src");
-			const dest = path.join(downloadDir, "new-dest");
-			fs.mkdirSync(src);
-			fs.writeFileSync(path.join(src, "file.txt"), "data");
+		test("places a multi-part book, nested folders included", async () => {
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({
+					"01.mp3": "one",
+					"02.mp3": "two",
+				}),
+				"https://cdn.example/p2.zip": await zipOf({
+					"03.mp3": "three",
+					"extras/bonus.mp3": "bonus",
+				}),
+			});
 
-			mergeDirectories([src], dest);
-
-			expect(fs.existsSync(dest)).toBe(true);
-			expect(fs.existsSync(path.join(dest, "file.txt"))).toBe(true);
-		});
-
-		test("cleans up source directories after merge", () => {
-			const src = path.join(cacheDir, "cleanup-src");
-			const dest = path.join(downloadDir, "cleanup-dest");
-			fs.mkdirSync(src);
-			fs.writeFileSync(path.join(src, "file.txt"), "data");
-
-			mergeDirectories([src], dest);
-
-			expect(fs.existsSync(src)).toBe(false);
-		});
-
-		test("handles empty source directory", () => {
-			const src = path.join(cacheDir, "empty-src");
-			const dest = path.join(downloadDir, "empty-dest");
-			fs.mkdirSync(src);
-
-			mergeDirectories([src], dest);
-
-			expect(fs.existsSync(dest)).toBe(true);
-			expect(fs.readdirSync(dest)).toHaveLength(0);
-		});
-
-		test("KNOWN BUG #5: should handle nested subdirectories in cache dirs", () => {
-			// This test documents issue #5 — mergeDirectories uses copyFileSync
-			// which cannot copy directories. When a zip extraction creates
-			// subdirectories inside the cache dir, mergeDirectories will throw.
-			//
-			// Expected behavior: nested subdirectories should be recursively
-			// copied to the destination. Instead, copyFileSync throws EISDIR
-			// because readdirSync lists "subfolder" as an entry and copyFileSync
-			// cannot copy a directory.
-			//
-			// This test INTENTIONALLY FAILS to prove the bug exists.
-			const src = path.join(cacheDir, "nested-src");
-			const dest = path.join(downloadDir, "nested-dest");
-			fs.mkdirSync(src);
-			fs.writeFileSync(path.join(src, "track01.mp3"), "audio");
-
-			// Create a nested subdirectory (e.g., from a zip with folder structure)
-			const nestedDir = path.join(src, "subfolder");
-			fs.mkdirSync(nestedDir);
-			fs.writeFileSync(path.join(nestedDir, "bonus.mp3"), "bonus-audio");
-
-			// This SHOULD succeed and copy all files recursively, but it throws.
-			// When the bug is fixed, this test will pass.
-			mergeDirectories([src], dest);
-
-			expect(fs.existsSync(path.join(dest, "track01.mp3"))).toBe(true);
-			expect(fs.existsSync(path.join(dest, "subfolder", "bonus.mp3"))).toBe(
-				true
+			const [finalPath] = await DownloadClient.downloadFiles(
+				book,
+				["https://cdn.example/p1.zip", "https://cdn.example/p2.zip"],
+				"token",
+				false,
+				downloadDir
 			);
+
+			expect(finalPath).toBe(path.join(downloadDir, book));
+			expect(files(finalPath)).toEqual([
+				"01.mp3",
+				"02.mp3",
+				"03.mp3",
+				path.join("extras", "bonus.mp3"),
+			]);
+			expect(fs.existsSync(staging())).toBe(false);
+		});
+
+		test("a later part wins a name clash", async () => {
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "first" }),
+				"https://cdn.example/p2.zip": await zipOf({ "01.mp3": "second" }),
+			});
+
+			await DownloadClient.downloadFiles(
+				book,
+				["https://cdn.example/p1.zip", "https://cdn.example/p2.zip"],
+				"token",
+				false,
+				downloadDir
+			);
+
+			expect(read("01.mp3")).toBe("second");
+		});
+
+		test("an HTTP error fails with the status and writes nothing", async () => {
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }),
+				"https://cdn.example/p2.zip": new Response("<html>Forbidden</html>", {
+					status: 403,
+					statusText: "Forbidden",
+				}),
+			});
+
+			await expect(
+				DownloadClient.downloadFiles(
+					book,
+					["https://cdn.example/p1.zip", "https://cdn.example/p2.zip"],
+					"token",
+					false,
+					downloadDir
+				)
+			).rejects.toThrow("Download failed: HTTP 403 Forbidden");
+			expect(fs.readdirSync(downloadDir)).toEqual([]);
+		});
+
+		test("a part that fails to unpack leaves no partial book", async () => {
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }),
+				"https://cdn.example/p2.zip": new TextEncoder().encode("not a zip")
+					.buffer as ArrayBuffer,
+			});
+
+			await expect(
+				DownloadClient.downloadFiles(
+					book,
+					["https://cdn.example/p1.zip", "https://cdn.example/p2.zip"],
+					"token",
+					false,
+					downloadDir
+				)
+			).rejects.toThrow();
+			// Part 1 was unpacked, but only in staging, which is cleaned up.
+			expect(fs.readdirSync(downloadDir)).toEqual([]);
+		});
+
+		test("a failed move into place leaves no partial book", async () => {
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }),
+				"https://cdn.example/p2.zip": await zipOf({ "02.mp3": "two" }),
+			});
+			spyOn(fs, "renameSync").mockImplementationOnce(() => {
+				throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+			});
+
+			await expect(
+				DownloadClient.downloadFiles(
+					book,
+					["https://cdn.example/p1.zip", "https://cdn.example/p2.zip"],
+					"token",
+					false,
+					downloadDir
+				)
+			).rejects.toThrow("EIO");
+			expect(fs.existsSync(path.join(downloadDir, book))).toBe(false);
+			expect(fs.existsSync(staging())).toBe(false);
+		});
+
+		test("clears what an interrupted attempt left in staging", async () => {
+			const leftover = DownloadClient.stagingPath(downloadDir, book);
+			fs.mkdirSync(leftover, { recursive: true });
+			fs.writeFileSync(path.join(leftover, "stale.mp3"), "from a crash");
+			serve({ "https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }) });
+
+			await DownloadClient.downloadFiles(
+				book,
+				["https://cdn.example/p1.zip"],
+				"token",
+				false,
+				downloadDir
+			);
+
+			expect(files(path.join(downloadDir, book))).toEqual(["01.mp3"]);
+			expect(fs.existsSync(staging())).toBe(false);
+		});
+
+		test("a re-download replaces files and keeps the others", async () => {
+			const existing = path.join(downloadDir, book);
+			fs.mkdirSync(path.join(existing, "extras"), { recursive: true });
+			fs.writeFileSync(path.join(existing, "01.mp3"), "old");
+			fs.writeFileSync(path.join(existing, "cover.jpg"), "mine");
+			fs.writeFileSync(path.join(existing, "extras", "notes.txt"), "mine");
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({
+					"01.mp3": "new",
+					"extras/bonus.mp3": "bonus",
+				}),
+			});
+
+			await DownloadClient.downloadFiles(
+				book,
+				["https://cdn.example/p1.zip"],
+				"token",
+				false,
+				downloadDir
+			);
+
+			expect(read("01.mp3")).toBe("new");
+			expect(read("cover.jpg")).toBe("mine");
+			expect(read("extras", "notes.txt")).toBe("mine");
+			expect(read("extras", "bonus.mp3")).toBe("bonus");
+		});
+
+		test("keepZip saves each part on a fresh cache", async () => {
+			// keepZip writes to the real cache dir; use a name no book has.
+			const author = `libro-test-${process.pid}-${Date.now()}`;
+			const keptBook = `${author}/Series/Title`;
+			serve({ "https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }) });
+			try {
+				const [, zips] = await DownloadClient.downloadFiles(
+					keptBook,
+					["https://cdn.example/p1.zip"],
+					"token",
+					true,
+					downloadDir
+				);
+
+				expect(zips).toEqual([path.join(CACHE_DIR, `${keptBook}-0.zip`)]);
+				const kept = await new JSZip().loadAsync(
+					new Uint8Array(fs.readFileSync((zips as string[])[0]))
+				);
+				expect(await kept.file("01.mp3")!.async("string")).toBe("one");
+			} finally {
+				fs.rmSync(path.join(CACHE_DIR, author), {
+					recursive: true,
+					force: true,
+				});
+			}
+		});
+	});
+
+	describe("atomic writes", () => {
+		test("saveMetadata replaces metadata.json and leaves no temp file", async () => {
+			const bookDir = path.join(downloadDir, "Book");
+			fs.mkdirSync(bookDir);
+			fs.writeFileSync(path.join(bookDir, "metadata.json"), "old");
+			const book: Audiobook = { isbn: "1", title: "Book" };
+			const fileData = {
+				isbn: "1",
+				parts: [],
+				tracks: [],
+				expires_at: "",
+				version: "1",
+				size_bytes: 0,
+			} as DownloadMetadata;
+
+			await DownloadClient.saveMetadata(book, fileData, bookDir);
+
+			expect(fs.readdirSync(bookDir)).toEqual(["metadata.json"]);
+			const saved = JSON.parse(
+				fs.readFileSync(path.join(bookDir, "metadata.json"), "utf-8")
+			);
+			expect(saved.book.title).toBe("Book");
 		});
 	});
 

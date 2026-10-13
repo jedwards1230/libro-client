@@ -25,7 +25,8 @@ src/
   lib/
     Config.ts       — Credentials config (env vars + JSON file in data/config/)
     Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/)
-    DownloadClient.ts — File download + zip extraction
+    DownloadClient.ts — File download + zip extraction; books are unpacked in
+                      <download dir>/.libro-partial and moved into place with renames
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
     Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials)
     Security.ts     — Secret redaction, libro.fm host check, path guards, 0600 file writes
