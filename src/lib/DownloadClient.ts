@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import APIHandler from "../APIHandler";
 import logger, { LogMethod } from "./Logger";
 import { CACHE_DIR, DOWNLOAD_DIR } from "./Directories";
+import { isLibroFmUrl, isWithin } from "./Security";
 
 const scope = "DownloadClient";
 
@@ -15,7 +16,7 @@ export default class DownloadCLient {
 	 * This assumes that the urls are meant to compile for one book.
 	 * (multi-part zip files, etc.)
 	 * */
-	@LogMethod({ scope, message: "Downloading files..." })
+	@LogMethod({ scope, message: "Downloading files...", secretArgs: [2] })
 	static async downloadFiles(
 		filename: string,
 		urls: string[],
@@ -23,6 +24,17 @@ export default class DownloadCLient {
 		keepZip = false,
 		directory?: string,
 	): Promise<[string, string[] | false]> {
+		const baseDir = directory || DOWNLOAD_DIR;
+		const finalPath = path.join(baseDir, filename);
+		if (
+			!isWithin(baseDir, finalPath) ||
+			!isWithin(CACHE_DIR, path.join(CACHE_DIR, filename))
+		) {
+			throw new Error(
+				`Refusing to write outside the download directory: ${filename}`
+			);
+		}
+
 		const buffers = await Promise.all(
 			urls.map((url) => DownloadCLient.download(url, authToken))
 		);
@@ -40,7 +52,6 @@ export default class DownloadCLient {
 			)
 		);
 
-		const finalPath = path.join(directory || DOWNLOAD_DIR, filename);
 		await DownloadCLient.mergeDirectories(paths, finalPath);
 
 		return [finalPath, zipped_files];
@@ -63,15 +74,16 @@ export default class DownloadCLient {
 	}
 
 	/** Downloads a file from a URL and returns the data as a Uint8Array */
-	@LogMethod({ scope, message: "Downloading file..." })
+	@LogMethod({ scope, message: "Downloading file...", secretArgs: [1] })
 	private static async download(
 		url: string,
 		authToken: string
 	): Promise<ArrayBuffer> {
 		try {
 			var opts = {};
-			const parsedUrl = new URL(url);
-			if (parsedUrl.hostname.endsWith("libro.fm")) {
+			// Only libro.fm itself gets the bearer token; part URLs on a CDN
+			// (or a lookalike such as evillibro.fm) are fetched without it.
+			if (isLibroFmUrl(url)) {
 				opts = {
 					headers: APIHandler.getHeaders(authToken),
 				};
@@ -127,6 +139,14 @@ export default class DownloadCLient {
 								outputPath,
 								relativePath
 							);
+							// Zip-slip guard: never write outside the extraction dir.
+							if (!isWithin(outputPath, filePath)) {
+								logger.warn(
+									`Skipping unsafe zip entry: ${relativePath}`,
+									{ fn: "DownloadClient.unzip" }
+								);
+								return;
+							}
 							const fileDir = path.dirname(filePath);
 							if (!fs.existsSync(fileDir)) {
 								fs.mkdirSync(fileDir, { recursive: true });

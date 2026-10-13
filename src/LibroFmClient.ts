@@ -5,6 +5,7 @@ import logger, { LogMethod } from "@/lib/Logger";
 import Config from "@/lib/Config";
 import State from "@/lib/State";
 import { DOWNLOAD_DIR } from "@/lib/Directories";
+import { safePathSegment } from "@/lib/Security";
 
 const scope = "LibroFmClient";
 
@@ -48,7 +49,7 @@ export default class LibroFmClient {
 	}
 
 	/** Logs in to the Libro.fm API and saves the authToken in the config. */
-	@LogMethod({ scope, message: "Logging in..." })
+	@LogMethod({ scope, message: "Logging in...", secretArgs: [0, 1] })
 	async login(username: string, password: string) {
 		const data = await APIHandler.fetchLoginData(username, password);
 		logger.verbose("Got new authToken", { fn: "LibroFmClient.login" });
@@ -131,8 +132,10 @@ export default class LibroFmClient {
 				.filter(Boolean)
 				.join(" - ");
 
+			// Each part comes from the API; keep it a single, safe path segment.
 			const filename = [authors, series, title]
 				.filter(Boolean)
+				.map((part) => safePathSegment(String(part)))
 				.join("/");
 
 			const [path, zipped_files] = await DownloadCLient.downloadFiles(
