@@ -17,10 +17,10 @@ bun run service.ts
 ## Architecture
 
 ```
-cli.ts              — CLI entry point (yargs commands: list, get, check)
+cli.ts              — CLI entry point (yargs commands: list, get, check, history)
 service.ts          — Long-running service (polls for new books every 30s)
 src/
-  LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks
+  LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks, getHistory
   APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
   lib/
     Config.ts       — Credentials config (env vars + JSON file in data/config/)
@@ -29,6 +29,7 @@ src/
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
     Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials)
     Security.ts     — Secret redaction, libro.fm host check, path guards, 0600 file writes
+    History.ts      — Per-title listening history from library user_metadata (text/JSON/CSV)
     State.ts        — Local book state (data/config/state.json)
   types.d.ts        — Global TypeScript types (Audiobook, AudiobookMap, etc.)
 ```
@@ -78,6 +79,10 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
   objects; the library response adds `ebooks` and `pending_preorders`.
 - **ISBNs are typed as `long` in the app** and the API has sent both strings and numbers.
   `APIHandler` normalizes them to strings so they stay valid map/state keys.
+- **Listening history**: `library` returns per-title `user_metadata` (`added_at`,
+  `last_touched_at`, `finished`, `track_index` (0-based) + `track_seconds`, bookmarks, tags).
+  There is no read endpoint for listening sessions: the app only `POST`s them to `listen`.
+  `GET users/metadata/by_isbn/{isbn}` exists in the app but its response shape is unverified.
 - When auth breaks, first probe `/oauth/token` with `curl` and dummy credentials: an
   `awselb` empty 401 means the header gate (bump `appVer`/`userAgent`); a JSON 401
   means headers are fine.
