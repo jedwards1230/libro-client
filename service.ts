@@ -1,5 +1,8 @@
 import LibroFmClient from "@/LibroFmClient";
+import { pollIntervalMs } from "@/lib/Config";
 
+// Read before logging in, so a bad LIBROFM_POLL_MINUTES fails right away.
+const pollInterval = pollIntervalMs();
 const client = new LibroFmClient();
 await client.init();
 
@@ -26,34 +29,22 @@ const scanLibrary = async () => {
 
 let overwrite = false;
 let keepZip = false;
+// The scan already holds each new book from the library; no second fetch.
 const downloadBooks = async (newBooks: Audiobook[]) => {
-	const isbns = newBooks.map((book) => book.isbn);
 	console.log("Downloading new books...");
 
-	const audiobookLibrary = await client.getLibrary();
-
-	const promisedBooks = isbns.map(async (isbn) => {
-		console.log(`Searching library for ISBN: ${isbn}`);
-		const book = audiobookLibrary[isbn];
-		if (book) {
-			console.log(`Downloading: ${book.title}`);
-			try {
-				const filepath = await client.downloadBook(
-					book,
-					overwrite,
-					keepZip
-				);
-				if (filepath) {
-					console.log(`Downloaded ${book.title}`);
-					return book;
-				} else {
-					console.log("No new books downloaded");
-				}
-			} catch (error) {
-				console.error("An error occurred:", error);
+	const promisedBooks = newBooks.map(async (book) => {
+		console.log(`Downloading: ${book.title}`);
+		try {
+			const filepath = await client.downloadBook(book, overwrite, keepZip);
+			if (filepath) {
+				console.log(`Downloaded ${book.title}`);
+				return book;
+			} else {
+				console.log("No new books downloaded");
 			}
-		} else {
-			console.warn(`No book found with ISBN: ${isbn}`);
+		} catch (error) {
+			console.error("An error occurred:", error);
 		}
 	});
 
@@ -82,8 +73,9 @@ const runService = async () => {
 	}
 };
 
+console.log(`Checking for new books every ${pollInterval / 60_000} minutes.`);
 runService();
-setInterval(runService, 30000);
+setInterval(runService, pollInterval);
 
 process.on("SIGINT", () => {
 	console.log("Exiting...");

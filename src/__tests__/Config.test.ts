@@ -3,6 +3,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
+import { DEFAULT_POLL_MINUTES, pollIntervalMs } from "../lib/Config";
+
 describe("Config", () => {
 	let tmpDir: string;
 	let configPath: string;
@@ -146,6 +148,31 @@ describe("Config", () => {
 			});
 			expect(config.username).toBe("init-user");
 			expect(config.password).toBe("init-pass");
+		});
+	});
+
+	describe("pollIntervalMs", () => {
+		test("defaults to 15 minutes when unset or empty", () => {
+			expect(DEFAULT_POLL_MINUTES).toBe(15);
+			expect(pollIntervalMs(undefined)).toBe(15 * 60_000);
+			expect(pollIntervalMs("")).toBe(15 * 60_000);
+			expect(pollIntervalMs("  ")).toBe(15 * 60_000);
+		});
+
+		test("reads minutes, fractions included", () => {
+			expect(pollIntervalMs("60")).toBe(60 * 60_000);
+			expect(pollIntervalMs("0.5")).toBe(30_000);
+		});
+
+		test("rejects values that are not a positive number", () => {
+			for (const bad of ["0", "-5", "abc", "15m", "Infinity"]) {
+				expect(() => pollIntervalMs(bad)).toThrow("LIBROFM_POLL_MINUTES");
+			}
+		});
+
+		test("rejects intervals setInterval cannot hold", () => {
+			expect(pollIntervalMs("35791")).toBe(35791 * 60_000);
+			expect(() => pollIntervalMs("35792")).toThrow("at most 35791");
 		});
 	});
 });

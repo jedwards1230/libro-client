@@ -118,6 +118,7 @@ You can set the following environment variables:
 DEBUG=true                          # enable debug-level logging (default: off)
 LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
+LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
 ```
 
 ### Where your credentials go
