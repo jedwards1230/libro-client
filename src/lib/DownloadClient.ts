@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import { createHash, randomBytes } from "crypto";
 import JSZip from "jszip";
 
 import APIHandler from "../APIHandler";
@@ -11,6 +12,9 @@ const scope = "DownloadClient";
 
 /** Helper class for downloading and unzipping files */
 export default class DownloadCLient {
+	/** Hidden folder in the download directory where books are unpacked. */
+	static readonly stagingDirName = ".libro-partial";
+
 	/**
 	 * Downloads a list of files and returns the paths.
 	 * This assumes that the urls are meant to compile for one book.
@@ -46,15 +50,34 @@ export default class DownloadCLient {
 				)
 			));
 
-		const paths = await Promise.all(
-			buffers.map((buffer, idx) =>
-				DownloadCLient.unzip(buffer, `/${filename}-${idx}`)
-			)
-		);
-
-		await DownloadCLient.mergeDirectories(paths, finalPath);
+		// Unpack into a staging folder, then move the book into place with
+		// renames only: a failed or interrupted download never leaves a partial
+		// book in the download directory.
+		const staging = DownloadCLient.stagingPath(baseDir, filename);
+		// Left behind by an interrupted attempt at the same book.
+		fs.rmSync(staging, { recursive: true, force: true });
+		try {
+			// In part order, so a later part wins a name clash, as before.
+			for (const buffer of buffers) {
+				await DownloadCLient.unzip(buffer, staging);
+			}
+			DownloadCLient.moveIntoPlace(staging, finalPath);
+		} finally {
+			fs.rmSync(staging, { recursive: true, force: true });
+			DownloadCLient.removeIfEmpty(path.dirname(staging));
+		}
 
 		return [finalPath, zipped_files];
+	}
+
+	/**
+	 * Staging folder for one book, inside the download directory so the final
+	 * move is a rename on the same filesystem. Stable per book, so the next
+	 * attempt clears what an interrupted one left.
+	 */
+	static stagingPath(baseDir: string, filename: string): string {
+		const id = createHash("sha256").update(filename).digest("hex");
+		return path.join(baseDir, DownloadCLient.stagingDirName, id.slice(0, 16));
 	}
 
 	/**
@@ -67,7 +90,7 @@ export default class DownloadCLient {
 		filepath: string
 	): Promise<void> {
 		const metadataPath = path.join(filepath, "metadata.json");
-		fs.writeFileSync(
+		DownloadCLient.writeFileAtomic(
 			metadataPath,
 			JSON.stringify({ book, fileData }, null, 2)
 		);
@@ -90,6 +113,12 @@ export default class DownloadCLient {
 			}
 
 			const response = await fetch(url, opts);
+			// An error page (e.g. an expired signed URL) is not a zip.
+			if (!response.ok) {
+				throw new Error(
+					`Download failed: HTTP ${response.status} ${response.statusText}`.trim()
+				);
+			}
 			const buffer = await response.arrayBuffer();
 
 			return buffer;
@@ -105,7 +134,9 @@ export default class DownloadCLient {
 		const data = new Uint8Array(buffer);
 		try {
 			const outputPath = path.join(CACHE_DIR, filename);
-			fs.writeFileSync(outputPath, data);
+			// The book's author/series folders may not exist in the cache yet.
+			fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+			DownloadCLient.writeFileAtomic(outputPath, data);
 			return outputPath;
 		} catch (error) {
 			logger.error({ error, fn: "DownloadClient.save" });
@@ -113,17 +144,16 @@ export default class DownloadCLient {
 		}
 	}
 
-	/** Unzips a file to a directory */
+	/** Unzips a file into a directory */
 	@LogMethod({ scope, message: "Unzipping file to filesystem..." })
 	static async unzip(
 		buffer: ArrayBuffer,
-		outputDir: string
+		outputPath: string
 	): Promise<string> {
 		try {
 			const zip = new JSZip();
 
 			const directory = await zip.loadAsync(buffer);
-			const outputPath = path.join(CACHE_DIR, outputDir);
 
 			if (!fs.existsSync(outputPath)) {
 				fs.mkdirSync(outputPath, { recursive: true });
@@ -167,27 +197,51 @@ export default class DownloadCLient {
 		}
 	}
 
-	/** Merge contents of two directories */
+	/**
+	 * Move `src` to `dest` with renames only. A new book appears in one step.
+	 * Into an existing folder (a re-download), each file is replaced in one
+	 * step, and files that aren't in the download are kept, as before.
+	 */
 	@LogMethod({ scope })
-	private static async mergeDirectories(
-		src: string[],
-		dest: string
-	): Promise<void> {
-		logger.silly(`Merging directories: ${src} -> ${dest}`, {
-			fn: "DownloadClient.mergeDirectories",
-		});
-		try {
-			if (!fs.existsSync(dest)) {
-				fs.mkdirSync(dest, { recursive: true });
-			}
-
-			for (const dir of src) {
-				fs.cpSync(dir, dest, { recursive: true });
-				fs.rmSync(dir, { recursive: true, force: true });
-			}
-		} catch (error) {
-			logger.error({ error, fn: "LibroFmClient.mergeDirectories" });
-			throw new Error("Failed to merge directories");
+	private static moveIntoPlace(src: string, dest: string): void {
+		if (!fs.existsSync(dest)) {
+			fs.mkdirSync(path.dirname(dest), { recursive: true });
+			fs.renameSync(src, dest);
+			return;
 		}
+		for (const name of fs.readdirSync(src)) {
+			const from = path.join(src, name);
+			const to = path.join(dest, name);
+			if (fs.statSync(from).isDirectory() && fs.existsSync(to)) {
+				DownloadCLient.moveIntoPlace(from, to);
+			} else {
+				fs.renameSync(from, to);
+			}
+		}
+	}
+
+	/** Write `data` to a temp file next to `file`, then rename it over `file`. */
+	private static writeFileAtomic(file: string, data: string | Uint8Array) {
+		const tmp = path.join(
+			path.dirname(file),
+			`.${path.basename(file)}.${randomBytes(6).toString("hex")}.tmp`
+		);
+		try {
+			fs.writeFileSync(tmp, data);
+			fs.renameSync(tmp, file);
+		} catch (error) {
+			fs.rmSync(tmp, { force: true });
+			throw error;
+		}
+	}
+
+	/**
+	 * Remove `dir` if it is empty. Best effort: other downloads may still be
+	 * using it, and a failure here must not hide the download's own error.
+	 */
+	private static removeIfEmpty(dir: string) {
+		try {
+			fs.rmdirSync(dir);
+		} catch {}
 	}
 }

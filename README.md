@@ -52,6 +52,8 @@ Replace `[...isbns]` with the ISBN of the audiobook you want to download. You ca
 
 If you don't specify an ISBN, the tool will prompt you to select an audiobook from your library.
 
+A book only shows up in your download folder once it is complete. It is unpacked in a hidden `.libro-partial` folder inside the download folder and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
+
 ### Check for new audiobooks
 
 To check for new audiobooks in your library, run the following command:
