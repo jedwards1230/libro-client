@@ -3,7 +3,12 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import { DEFAULT_POLL_MINUTES, pollIntervalMs } from "../lib/Config";
+import {
+	DEFAULT_PARALLEL_DOWNLOADS,
+	DEFAULT_POLL_MINUTES,
+	parallelDownloads,
+	pollIntervalMs,
+} from "../lib/Config";
 
 describe("Config", () => {
 	let tmpDir: string;
@@ -173,6 +178,28 @@ describe("Config", () => {
 		test("rejects intervals setInterval cannot hold", () => {
 			expect(pollIntervalMs("35791")).toBe(35791 * 60_000);
 			expect(() => pollIntervalMs("35792")).toThrow("at most 35791");
+		});
+	});
+
+	describe("parallelDownloads", () => {
+		test("defaults to 4 when unset or empty", () => {
+			expect(DEFAULT_PARALLEL_DOWNLOADS).toBe(4);
+			expect(parallelDownloads(undefined)).toBe(4);
+			expect(parallelDownloads("")).toBe(4);
+			expect(parallelDownloads("  ")).toBe(4);
+		});
+
+		test("reads a whole number", () => {
+			expect(parallelDownloads("1")).toBe(1);
+			expect(parallelDownloads("8")).toBe(8);
+		});
+
+		test("rejects values that are not a whole number of 1 or more", () => {
+			for (const bad of ["0", "-2", "2.5", "abc", "Infinity"]) {
+				expect(() => parallelDownloads(bad)).toThrow(
+					"LIBROFM_PARALLEL_DOWNLOADS"
+				);
+			}
 		});
 	});
 });

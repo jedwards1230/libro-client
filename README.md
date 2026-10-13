@@ -90,7 +90,7 @@ Libro.fm's API has no endpoint that returns individual listening sessions (the a
 
 ## Background service
 
-The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library.
+The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library. It downloads up to 4 new books at a time (`LIBROFM_PARALLEL_DOWNLOADS`), so the first run on a large library takes a while; checks that come due meanwhile are skipped.
 
 To run the service, you can use Docker or another process manager.
 
@@ -121,6 +121,7 @@ DEBUG=true                          # enable debug-level logging (default: off)
 LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
+LIBROFM_PARALLEL_DOWNLOADS=4        # background service: new books downloaded at the same time (default: 4)
 ```
 
 ### Where your credentials go

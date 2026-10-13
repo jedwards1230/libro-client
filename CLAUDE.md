@@ -31,6 +31,7 @@ src/
     Security.ts     — Secret redaction, libro.fm host check, path guards, 0600 file writes
     History.ts      — Per-title listening history from library user_metadata (text/JSON/CSV)
     State.ts        — Local book state (data/config/state.json)
+    Concurrency.ts  — mapWithLimit: Promise.all with a cap on calls running at once
   types.d.ts        — Global TypeScript types (Audiobook, AudiobookMap, etc.)
 ```
 
@@ -96,6 +97,7 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 | `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
+| `LIBROFM_PARALLEL_DOWNLOADS` | No | New books the background service downloads at the same time (default 4) |
 
 Only the username, auth token and download directory are persisted to `data/config/config.json`
 (mode `0600`; `data/` is `0700`). The password is never written to disk — a fresh login takes it
