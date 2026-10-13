@@ -10,7 +10,7 @@ Audiobook downloader and service for Libro.fm. Downloads audiobooks from the Lib
 # Run CLI
 bun run cli.ts <command>
 
-# Run as background service (polls every 30s)
+# Run as background service (checks every 15 min; LIBROFM_POLL_MINUTES)
 bun run service.ts
 ```
 
@@ -18,7 +18,7 @@ bun run service.ts
 
 ```
 cli.ts              — CLI entry point (yargs commands: list, get, check, history)
-service.ts          — Long-running service (polls for new books every 30s)
+service.ts          — Long-running service (checks for new books every LIBROFM_POLL_MINUTES, default 15)
 src/
   LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks, getHistory
   APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
@@ -95,6 +95,7 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 |----------|----------|-------------|
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
+| `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
 
 Only the username, auth token and download directory are persisted to `data/config/config.json`
 (mode `0600`; `data/` is `0700`). The password is never written to disk — a fresh login takes it

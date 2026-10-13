@@ -19,6 +19,30 @@ export function persistedConfig(config: Partial<Config>) {
 	return persisted;
 }
 
+/** Minutes between library checks in the background service. */
+export const DEFAULT_POLL_MINUTES = 15;
+// setInterval fires immediately for delays above 2^31 - 1 ms (~24.8 days).
+const MAX_POLL_MS = 2 ** 31 - 1;
+
+/**
+ * Milliseconds between the background service's library checks: the
+ * LIBROFM_POLL_MINUTES env var (fractions allowed), or 15 minutes if unset.
+ */
+export function pollIntervalMs(
+	minutes: string | undefined = process.env.LIBROFM_POLL_MINUTES
+): number {
+	if (minutes === undefined || minutes.trim() === "") {
+		return DEFAULT_POLL_MINUTES * 60_000;
+	}
+	const ms = Number(minutes) * 60_000;
+	if (!(ms > 0 && ms <= MAX_POLL_MS)) {
+		throw new Error(
+			`LIBROFM_POLL_MINUTES must be a number of minutes above 0 and at most ${Math.floor(MAX_POLL_MS / 60_000)}, got "${minutes}"`
+		);
+	}
+	return ms;
+}
+
 /** Configuration for the app */
 export default class Config {
 	username: string | undefined;
