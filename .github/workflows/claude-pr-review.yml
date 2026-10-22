@@ -22,6 +22,10 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       LITELLM_CI_KEY: ${{ secrets.LITELLM_CI_KEY }}
       LENS_TRACING_KEY: ${{ secrets.LENS_TRACING_KEY }}
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
+      LITELLM_CI_BASE_URL: ${{ secrets.LITELLM_CI_BASE_URL }}
+      LENS_CI_OTLP_ENDPOINT: ${{ secrets.LENS_CI_OTLP_ENDPOINT }}
     with:
       focus: |
         libro-client is a TypeScript audiobook service.
