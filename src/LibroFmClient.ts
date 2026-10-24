@@ -1,6 +1,7 @@
 import DownloadCLient from "@/lib/DownloadClient";
 import InputHandler from "@/lib/InputHandler";
-import APIHandler from "@/APIHandler";
+import APIHandler, { isAuthError } from "@/APIHandler";
+import { Backoff } from "@/lib/Backoff";
 import logger, { LogMethod } from "@/lib/Logger";
 import Config from "@/lib/Config";
 import { metrics } from "@/lib/Metrics";
@@ -9,10 +10,31 @@ import { DOWNLOAD_DIR } from "@/lib/Directories";
 
 const scope = "LibroFmClient";
 
+export interface LibroFmClientOptions {
+	/**
+	 * Long-running service mode: log in again with the stored credentials when
+	 * the auth token is missing or rejected, instead of failing every scan until
+	 * the process restarts. The interactive CLI leaves this off.
+	 */
+	autoRelogin?: boolean;
+	config?: Config;
+	state?: State;
+	loginBackoff?: Backoff;
+}
+
 /** Client for the Libro.fm API. */
 export default class LibroFmClient {
-	config = new Config();
-	state = new State();
+	config: Config;
+	state: State;
+	private readonly autoRelogin: boolean;
+	private readonly loginBackoff: Backoff;
+
+	constructor(options: LibroFmClientOptions = {}) {
+		this.config = options.config ?? new Config();
+		this.state = options.state ?? new State();
+		this.autoRelogin = options.autoRelogin ?? false;
+		this.loginBackoff = options.loginBackoff ?? new Backoff();
+	}
 
 	/**
 	 * Initialize the client.
@@ -51,17 +73,59 @@ export default class LibroFmClient {
 	/** Logs in to the Libro.fm API and saves the authToken in the config. */
 	@LogMethod({ scope, message: "Logging in..." })
 	async login(username: string, password: string) {
-		const data = await APIHandler.fetchLoginData(username, password);
-		logger.verbose("Got new authToken", { fn: "LibroFmClient.login" });
-		this.config.change({ authToken: data.access_token });
+		try {
+			const data = await APIHandler.fetchLoginData(username, password);
+			logger.verbose("Got new authToken", { fn: "LibroFmClient.login" });
+			this.config.change({ authToken: data.access_token });
+		} catch (error) {
+			metrics.recordLogin("error");
+			throw error;
+		}
+		metrics.recordLogin("success");
+	}
+
+	/**
+	 * Service mode only. Logs in with the stored credentials if there is no
+	 * token. Honours the login backoff, so a persistent failure (bad password,
+	 * an API gate) makes the scan fail without touching the login endpoint
+	 * again until the backoff has elapsed.
+	 */
+	private async ensureLoggedIn() {
+		if (this.config.authToken) return;
+		const { username, password } = this.config;
+		if (!username || !password) {
+			throw new Error(
+				"Not logged in and no stored credentials to log in with"
+			);
+		}
+		const wait = this.loginBackoff.remainingMs();
+		if (wait > 0) {
+			throw new Error(
+				`Not logged in; next login attempt in ${Math.ceil(wait / 1000)}s ` +
+					`(${this.loginBackoff.failures} recent failure(s))`
+			);
+		}
+		try {
+			await this.login(username, password);
+		} catch (error) {
+			this.loginBackoff.recordFailure();
+			throw error;
+		}
 	}
 
 	/** Fetches the library of audiobooks. */
 	@LogMethod({ scope, message: "Fetching library..." })
 	async getLibrary(): Promise<AudiobookMap> {
+		// At most one login per call: either the token was missing or it was rejected.
+		let loggedInThisCall = false;
+		if (this.autoRelogin && !this.config.authToken) {
+			await this.ensureLoggedIn();
+			loggedInThisCall = true;
+		}
 		if (!this.config.authToken) throw new Error("Not logged in");
 		let audiobooks: AudiobookMap = {};
 		let page = 1;
+		let failed = false;
 		while (true) {
 			try {
 				const data = await APIHandler.fetchLibrary(
@@ -78,6 +142,22 @@ export default class LibroFmClient {
 				}
 				page += 1;
 			} catch (error: any) {
+				if (this.autoRelogin) {
+					if (isAuthError(error) && !loggedInThisCall) {
+						// The token was rejected: drop it, log in once and retry this page.
+						loggedInThisCall = true;
+						logger.warn("Library fetch was rejected; logging in again", {
+							fn: "LibroFmClient.getLibrary",
+						});
+						this.config.change({ authToken: undefined });
+						await this.ensureLoggedIn();
+						continue;
+					}
+					// The fetch failed even with a fresh token, or for another reason:
+					// the next scan logs in again, so back off first.
+					this.loginBackoff.recordFailure();
+				}
+				failed = true;
 				metrics.recordLibraryFetchError();
 				logger.error(`Failed to fetch library: ${error.message}`, {
 					fn: "LibroFmClient.getLibrary",
@@ -87,6 +167,7 @@ export default class LibroFmClient {
 			}
 		}
 
+		if (this.autoRelogin && !failed) this.loginBackoff.reset();
 		return audiobooks;
 	}
 

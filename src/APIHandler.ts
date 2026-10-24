@@ -2,6 +2,22 @@ import logger, { LogMethod } from "./lib/Logger";
 
 const scope = "APIHandler";
 
+/** A non-2xx API response. Carries the HTTP status so callers can tell an auth failure from a server one. */
+export class ApiError extends Error {
+	constructor(message: string, readonly status: number) {
+		super(message);
+		this.name = "ApiError";
+	}
+}
+
+/** The server rejected the credentials or token (HTTP 401 or 403). */
+export function isAuthError(error: unknown): boolean {
+	return (
+		error instanceof ApiError &&
+		(error.status === 401 || error.status === 403)
+	);
+}
+
 // Libro.fm has no public API; endpoints and required headers are reverse-engineered
 // from the official Android app. The actively-maintained reference implementation is
 // https://github.com/burntcookie90/librofm-downloader — keep these values in sync
@@ -90,7 +106,10 @@ export default class APIHandler {
 	@LogMethod({ scope })
 	private static statusCheck(response: Response) {
 		if (!response.ok) {
-			throw new Error(response.statusText);
+			throw new ApiError(
+				response.statusText || `HTTP ${response.status}`,
+				response.status
+			);
 		}
 	}
 

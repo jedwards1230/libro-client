@@ -9,7 +9,8 @@ const log = createJsonLog("service");
 
 startMetricsServer();
 
-const client = new LibroFmClient();
+// Only the service logs in again on its own; the CLI prompts instead.
+const client = new LibroFmClient({ autoRelogin: true });
 await client.init();
 
 const scanLibrary = async () => {
