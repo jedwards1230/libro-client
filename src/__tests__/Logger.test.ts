@@ -135,7 +135,7 @@ describe("Logger", () => {
 			const line = formatJsonLine({
 				level: "error",
 				logger: "service",
-				msg: "Scan failed",
+				msg: "Sync run failed",
 				error: err,
 			});
 			// The raw line has no real newline even though the stack has several.
@@ -148,7 +148,7 @@ describe("Logger", () => {
 			expect(parsed.stack).toContain("Error: Not logged in");
 			expect(parsed.stack).toContain("\n");
 			// The log shipper keeps only `msg`, so the reason must be in it
-			expect(parsed.msg).toBe("Scan failed: Not logged in");
+			expect(parsed.msg).toBe("Sync run failed: Not logged in");
 		});
 
 		test("does not repeat the error text when msg already has it", () => {

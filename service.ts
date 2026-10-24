@@ -14,25 +14,21 @@ await client.init();
 
 const scanLibrary = async () => {
 	log.info("Checking for new books...");
-	try {
-		const newBooks = await metrics.trackScan(() => client.getNewBooks());
+	// A failure is logged once, by runService, which carries the error and stack.
+	const newBooks = await metrics.trackScan(() => client.getNewBooks());
 
-		if (newBooks.length > 0) {
-			log.info(`Found ${newBooks.length} new books`, {
-				count: newBooks.length,
-			});
-			newBooks.forEach((book) => {
-				log.info(`New book: ${book.title}`, { isbn: book.isbn });
-			});
-		} else {
-			log.info("No new books found.");
-		}
-
-		return newBooks;
-	} catch (error) {
-		log.error("Scan failed", { error });
-		throw error;
+	if (newBooks.length > 0) {
+		log.info(`Found ${newBooks.length} new books`, {
+			count: newBooks.length,
+		});
+		newBooks.forEach((book) => {
+			log.info(`New book: ${book.title}`, { isbn: book.isbn });
+		});
+	} else {
+		log.info("No new books found.");
 	}
+
+	return newBooks;
 };
 
 let overwrite = false;

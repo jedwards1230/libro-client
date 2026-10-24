@@ -96,6 +96,6 @@ These names are a contract with the alert rules that consume them; do not rename
 
 ## Logging
 
-The service logs one JSON object per line on stdout (`useJsonConsole()` + `createJsonLog()`; `src/lib/LogFormat.ts`). Fields suit the log shipper (Grafana Alloy): `ts` (RFC3339), `level` and `logger` (a stable scope), which become labels, and `msg`. Errors add `error` (message) and `stack` (one string). The shipper stores only `msg`, so `msg` includes the error text (`Scan failed: Not logged in`); the full `error`/`stack` fields are in the raw stdout line.
+The service logs one JSON object per line on stdout (`useJsonConsole()` + `createJsonLog()`; `src/lib/LogFormat.ts`). Fields suit the log shipper (Grafana Alloy): `ts` (RFC3339), `level` and `logger` (a stable scope), which become labels, and `msg`. Errors add `error` (message) and `stack` (one string). The shipper stores only `msg`, so `msg` includes the error text (`Sync run failed: Not logged in`); the full `error`/`stack` fields are in the raw stdout line.
 
 The CLI stays human-readable: `Logger.ts` switches the console to JSON only when `useJsonConsole()` is called (the service does; `cli.ts` does not), because TTY detection would wrap piped output such as `libro check --json | jq`. The `data/logs/*.log` files are JSON lines for both. Do not use `console.*` in the service or `Metrics.ts`: Bun prints a source excerpt for `console.error(error)`, which splits one event over many lines.
