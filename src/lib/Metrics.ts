@@ -227,7 +227,14 @@ export function createLibroMetrics(options: LibroMetricsOptions = {}) {
 		"Library fetch errors that getLibrary() swallowed: it clears the auth token and returns an empty library instead of throwing."
 	);
 
+	const logins = registry.counter(
+		"libro_login_total",
+		"Login attempts, by result.",
+		["result"]
+	);
+
 	scans.init({ result: "success" }).init({ result: "error" });
+	logins.init({ result: "success" }).init({ result: "error" });
 	errors.init({ stage: "scan" }).init({ stage: "download" });
 
 	function recordScanSuccess() {
@@ -248,6 +255,11 @@ export function createLibroMetrics(options: LibroMetricsOptions = {}) {
 
 		recordScanSuccess,
 		recordScanError,
+
+		/** A login attempt finished. */
+		recordLogin(result: "success" | "error") {
+			logins.inc({ result });
+		},
 
 		/** `getLibrary()` hit a fetch error and swallowed it. */
 		recordLibraryFetchError() {

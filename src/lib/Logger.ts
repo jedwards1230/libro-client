@@ -3,7 +3,12 @@ import path from "path";
 import fs from "fs";
 
 import { LOGS_DIR } from "./Directories";
-import { jsonLogFormat } from "./LogFormat";
+import {
+	jsonLogFormat,
+	paramNames,
+	redactArgs,
+	redactFormat,
+} from "./LogFormat";
 
 if (fs.existsSync(LOGS_DIR)) {
 	fs.readdirSync(LOGS_DIR).forEach((file) => {
@@ -84,6 +89,9 @@ export function useJsonConsole() {
 
 const logger = createLogger({
 	level: DEBUG_MODE ? "debug" : "info",
+	// On the logger, not a transport, so every transport (and any added later)
+	// only ever sees masked credentials.
+	format: redactFormat,
 
 	transports: [
 		consoleTransport,
@@ -122,6 +130,7 @@ export function LogMethod(
 		descriptor: PropertyDescriptor
 	) {
 		const originalMethod = descriptor.value;
+		const argNames = paramNames(originalMethod);
 
 		descriptor.value = function (...args: any[]) {
 			const fn = scope || target.constructor.name;
@@ -132,7 +141,8 @@ export function LogMethod(
 				});
 			}
 			logger.log(level, {
-				args,
+				// Arguments named like credentials (password, token...) are masked.
+				args: redactArgs(args, argNames),
 				message,
 				...rest,
 				fn: `${fn}.${propertyKey}`,

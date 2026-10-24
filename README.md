@@ -83,6 +83,10 @@ Or use the provided `docker-compose.yml` file:
 docker-compose up -d
 ```
 
+### Re-login
+
+The service logs in at start-up and keeps the token it is given. If the token is missing or the library fetch is rejected with HTTP 401 or 403, it logs in again with the stored credentials (`LIBROFM_USERNAME`/`LIBROFM_PASSWORD` or `data/config/config.json`) and, for a rejected token, retries the fetch once, all within the same scan. Other failures (network errors, 5xx) are handled as before. A failed login backs off exponentially, from 1 minute up to 30 minutes, and resets after a fetch succeeds; while backing off, scans fail without contacting the login endpoint. The interactive CLI never logs in on its own.
+
 ### Metrics
 
 The service exposes Prometheus metrics at `GET /metrics` (text format 0.0.4) on `0.0.0.0:9464`. Set `METRICS_PORT` to change the port. If the port is already taken the service logs a warning and keeps syncing without it.
@@ -96,6 +100,7 @@ The endpoint is **unauthenticated** and meant to be reached only from inside the
 | `libro_scans_total` | counter | `result` = `success` or `error` | Scans finished, by result. |
 | `libro_books_downloaded_total` | counter | none | Books downloaded. |
 | `libro_errors_total` | counter | `stage` = `scan` or `download` | Errors, by stage. |
+| `libro_login_total` | counter | `result` = `success` or `error` | Login attempts, by result (both series start at 0). The service logs in at start-up and again whenever its token is missing or rejected. |
 | `libro_library_fetch_errors_total` | counter | none | Library fetch errors. The client swallows these (it clears its auth token and returns an empty library instead of throwing), so each one also makes that scan count as an error. |
 
 To alert on a stalled sync, use the age of the last success. It reads as a huge number (the current Unix time) if a sync has not succeeded since the process started:

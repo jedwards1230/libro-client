@@ -234,6 +234,8 @@ describe("Metrics", () => {
 			expect(sample(text, "libro_books_downloaded_total")).toBe(0);
 			expect(sample(text, 'libro_errors_total{stage="scan"}')).toBe(0);
 			expect(sample(text, 'libro_errors_total{stage="download"}')).toBe(0);
+			expect(sample(text, 'libro_login_total{result="success"}')).toBe(0);
+			expect(sample(text, 'libro_login_total{result="error"}')).toBe(0);
 		});
 
 		test("declares the contract types", () => {
@@ -243,6 +245,7 @@ describe("Metrics", () => {
 			expect(text).toContain("# TYPE libro_scans_total counter");
 			expect(text).toContain("# TYPE libro_books_downloaded_total counter");
 			expect(text).toContain("# TYPE libro_errors_total counter");
+			expect(text).toContain("# TYPE libro_login_total counter");
 		});
 
 		test("a successful scan stamps both timestamps, even with no new books", () => {
@@ -357,6 +360,18 @@ describe("Metrics", () => {
 				expect(sample(text, 'libro_scans_total{result="error"}')).toBe(1);
 				expect(sample(text, 'libro_scans_total{result="success"}')).toBe(1);
 			});
+		});
+
+		test("logins are counted by result and do not touch the scan series", () => {
+			const { m, out } = setup();
+			m.recordLogin("success");
+			m.recordLogin("error");
+			m.recordLogin("error");
+			const text = out();
+			expect(sample(text, 'libro_login_total{result="success"}')).toBe(1);
+			expect(sample(text, 'libro_login_total{result="error"}')).toBe(2);
+			expect(sample(text, 'libro_scans_total{result="error"}')).toBe(0);
+			expect(sample(text, "libro_last_scan_timestamp_seconds")).toBe(0);
 		});
 
 		test("download events move only the download series", () => {
