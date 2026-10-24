@@ -1,4 +1,7 @@
 import LibroFmClient from "@/LibroFmClient";
+import { metrics, startMetricsServer } from "@/lib/Metrics";
+
+startMetricsServer();
 
 const client = new LibroFmClient();
 await client.init();
@@ -7,6 +10,7 @@ const scanLibrary = async () => {
 	console.log("Checking for new books...");
 	try {
 		const newBooks = await client.getNewBooks();
+		metrics.recordScanSuccess();
 
 		if (newBooks.length > 0) {
 			console.log(`Found ${newBooks.length} new books:`);
@@ -19,6 +23,7 @@ const scanLibrary = async () => {
 
 		return newBooks;
 	} catch (error) {
+		metrics.recordScanError();
 		console.error("An error occurred:", error);
 		throw error;
 	}
@@ -45,11 +50,13 @@ const downloadBooks = async (newBooks: Audiobook[]) => {
 				);
 				if (filepath) {
 					console.log(`Downloaded ${book.title}`);
+					metrics.recordDownload();
 					return book;
 				} else {
 					console.log("No new books downloaded");
 				}
 			} catch (error) {
+				metrics.recordDownloadError();
 				console.error("An error occurred:", error);
 			}
 		} else {
@@ -74,7 +81,14 @@ const runService = async () => {
 
 	try {
 		const newBooks = await scanLibrary();
-		if (newBooks.length > 0) await downloadBooks(newBooks);
+		if (newBooks.length > 0) {
+			try {
+				await downloadBooks(newBooks);
+			} catch (error) {
+				metrics.recordDownloadError();
+				throw error;
+			}
+		}
 	} catch (error) {
 		console.error("An error occurred:", error);
 	} finally {

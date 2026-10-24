@@ -18,7 +18,7 @@ bun run service.ts
 
 ```
 cli.ts              — CLI entry point (yargs commands: list, get, check)
-service.ts          — Long-running service (polls for new books every 30s)
+service.ts          — Long-running service (polls for new books every 30s, serves /metrics)
 src/
   LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks
   APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
@@ -28,6 +28,7 @@ src/
     DownloadClient.ts — File download + zip extraction
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
     Logger.ts       — Winston logger + @LogMethod decorator
+    Metrics.ts      — Hand-rolled Prometheus registry + /metrics server (no dependencies)
     State.ts        — Local book state (data/config/state.json)
   types.d.ts        — Global TypeScript types (Audiobook, AudiobookMap, etc.)
 ```
@@ -71,6 +72,24 @@ reference is [burntcookie90/librofm-downloader](https://github.com/burntcookie90
 |----------|----------|-------------|
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
+| `METRICS_PORT` | No | Port for the service's Prometheus `/metrics` endpoint (default `9464`; invalid values warn and fall back) |
+| `LIBRO_VERSION` | No | Reported as the `version` label of `libro_info`. The Docker build sets it from the release version; otherwise `unknown` |
 
 Credentials are persisted to `data/config/config.json` after first successful login. Auth tokens are also cached there.
 
+## Metrics
+
+`service.ts` starts `startMetricsServer()` (`src/lib/Metrics.ts`) before anything else: `GET /metrics` on `0.0.0.0:${METRICS_PORT ?? 9464}`, Prometheus text format 0.0.4, no dependencies. `404` for other paths, `405` for non-GET. If the port is taken it logs a warning and the sync loop carries on. The endpoint is **unauthenticated and cluster-internal**; never expose it publicly.
+
+| Metric | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `libro_last_successful_sync_timestamp_seconds` | gauge | none | Unix time `client.getNewBooks()` last returned without throwing, with or without new books. `0` until the first success |
+| `libro_last_scan_timestamp_seconds` | gauge | none | Unix time the last scan attempt finished, success or not. `0` until the first scan finishes |
+| `libro_scans_total` | counter | `result`: `success`, `error` | Scans finished (both series start at 0) |
+| `libro_books_downloaded_total` | counter | none | Books actually downloaded |
+| `libro_errors_total` | counter | `stage`: `scan`, `download` | Errors by stage (both series start at 0) |
+| `libro_info` | gauge | `version` | Always 1 |
+
+These names are a contract with the alert rules that consume them; do not rename them. Event-to-series logic lives in `createLibroMetrics()` (`recordScanSuccess`, `recordScanError`, `recordDownload`, `recordDownloadError`) so it is tested without importing `service.ts`, which starts the loop on import.
+
+Known limitation: "successful" means `getNewBooks()` did not throw. `LibroFmClient.getLibrary()` swallows library-fetch errors (it clears the auth token and returns an empty library), so the first scan after such a failure counts as a success; the scans after it throw `Not logged in` and count as errors.

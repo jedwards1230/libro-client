@@ -83,6 +83,26 @@ Or use the provided `docker-compose.yml` file:
 docker-compose up -d
 ```
 
+### Metrics
+
+The service exposes Prometheus metrics at `GET /metrics` (text format 0.0.4) on `0.0.0.0:9464`. Set `METRICS_PORT` to change the port. If the port is already taken the service logs a warning and keeps syncing without it.
+
+The endpoint is **unauthenticated** and meant to be reached only from inside the cluster or a trusted network; do not publish the port to the internet.
+
+| Metric | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `libro_last_successful_sync_timestamp_seconds` | gauge | none | Unix time a full library scan last completed without throwing, whether or not it found new books. `0` until the first success. |
+| `libro_last_scan_timestamp_seconds` | gauge | none | Unix time the last scan attempt finished, successful or not. `0` until the first scan finishes. |
+| `libro_scans_total` | counter | `result` = `success` or `error` | Scans finished, by result. |
+| `libro_books_downloaded_total` | counter | none | Books downloaded. |
+| `libro_errors_total` | counter | `stage` = `scan` or `download` | Errors, by stage. |
+| `libro_info` | gauge | `version` | Always `1`; `version` comes from `LIBRO_VERSION` (set by the Docker image build, otherwise `unknown`). |
+
+To alert on a stalled sync, use the age of the last success. It reads as a huge number (the current Unix time) if a sync has never succeeded since the process started:
+
+```promql
+time() - libro_last_successful_sync_timestamp_seconds
+```
 
 ## Configuration
 
@@ -92,6 +112,7 @@ You can set the following environment variables:
 DEBUG=true                          # enable debug-level logging (default: off)
 LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
+METRICS_PORT=9464                   # port for the service's Prometheus /metrics endpoint (default: 9464)
 ```
 
 ## Contributing
