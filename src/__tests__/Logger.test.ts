@@ -117,7 +117,7 @@ describe("Logger", () => {
 			expect(parsed.level).toBe("info");
 			expect(parsed.logger).toBe("service");
 			expect(parsed.msg).toBe("Checking for new books...");
-			// RFC3339, which is what Alloy's json_processor parses from `ts`
+			// RFC3339, which log shippers parse from `ts`
 			expect(parsed.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
 			expect(Date.parse(parsed.ts)).not.toBeNaN();
 		});
@@ -147,7 +147,7 @@ describe("Logger", () => {
 			expect(typeof parsed.stack).toBe("string");
 			expect(parsed.stack).toContain("Error: Not logged in");
 			expect(parsed.stack).toContain("\n");
-			// Alloy stores only `msg`, so the reason must be in it
+			// The log shipper keeps only `msg`, so the reason must be in it
 			expect(parsed.msg).toBe("Scan failed: Not logged in");
 		});
 

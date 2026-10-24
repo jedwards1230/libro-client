@@ -4,11 +4,10 @@
  * Kept free of side effects (unlike `Logger.ts`, which prunes the logs
  * directory on import) so it can be imported and tested in isolation.
  *
- * Field names match the cluster's Alloy `json_processor`: `level` becomes a
- * Loki label, `ts` (RFC3339) the entry timestamp, `logger` a label, and `msg`
- * the stored line. Alloy keeps ONLY `msg` in Loki, so the error text is
- * appended to `msg`; the full `error` / `stack` fields stay in the raw line
- * (`kubectl logs`).
+ * Field names suit the log shipper (Grafana Alloy): `level` and `logger`
+ * become labels, `ts` (RFC3339) the entry timestamp and `msg` the stored line.
+ * The shipper keeps only `msg`, so the error text is appended to it; the full
+ * `error` / `stack` fields stay in the raw stdout line.
  */
 import { format } from "winston";
 
