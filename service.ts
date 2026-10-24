@@ -1,5 +1,11 @@
 import LibroFmClient from "@/LibroFmClient";
+import { createJsonLog } from "@/lib/LogFormat";
+import { useJsonConsole } from "@/lib/Logger";
 import { metrics, startMetricsServer } from "@/lib/Metrics";
+
+// Daemon output is one JSON object per line for the log shipper.
+useJsonConsole();
+const log = createJsonLog("service");
 
 startMetricsServer();
 
@@ -7,24 +13,26 @@ const client = new LibroFmClient();
 await client.init();
 
 const scanLibrary = async () => {
-	console.log("Checking for new books...");
+	log.info("Checking for new books...");
 	try {
 		const newBooks = await client.getNewBooks();
 		metrics.recordScanSuccess();
 
 		if (newBooks.length > 0) {
-			console.log(`Found ${newBooks.length} new books:`);
-			newBooks.forEach((book, idx) => {
-				console.log(`${idx + 1}. ${book.title}`);
+			log.info(`Found ${newBooks.length} new books`, {
+				count: newBooks.length,
+			});
+			newBooks.forEach((book) => {
+				log.info(`New book: ${book.title}`, { isbn: book.isbn });
 			});
 		} else {
-			console.log("No new books found.");
+			log.info("No new books found.");
 		}
 
 		return newBooks;
 	} catch (error) {
 		metrics.recordScanError();
-		console.error("An error occurred:", error);
+		log.error("Scan failed", { error });
 		throw error;
 	}
 };
@@ -33,15 +41,15 @@ let overwrite = false;
 let keepZip = false;
 const downloadBooks = async (newBooks: Audiobook[]) => {
 	const isbns = newBooks.map((book) => book.isbn);
-	console.log("Downloading new books...");
+	log.info("Downloading new books...");
 
 	const audiobookLibrary = await client.getLibrary();
 
 	const promisedBooks = isbns.map(async (isbn) => {
-		console.log(`Searching library for ISBN: ${isbn}`);
+		log.info(`Searching library for ISBN: ${isbn}`, { isbn });
 		const book = audiobookLibrary[isbn];
 		if (book) {
-			console.log(`Downloading: ${book.title}`);
+			log.info(`Downloading: ${book.title}`, { isbn });
 			try {
 				const filepath = await client.downloadBook(
 					book,
@@ -49,25 +57,25 @@ const downloadBooks = async (newBooks: Audiobook[]) => {
 					keepZip
 				);
 				if (filepath) {
-					console.log(`Downloaded ${book.title}`);
+					log.info(`Downloaded ${book.title}`, { isbn });
 					metrics.recordDownload();
 					return book;
 				} else {
-					console.log("No new books downloaded");
+					log.info("No new books downloaded", { isbn });
 				}
 			} catch (error) {
 				metrics.recordDownloadError();
-				console.error("An error occurred:", error);
+				log.error("Download failed", { error, isbn });
 			}
 		} else {
-			console.warn(`No book found with ISBN: ${isbn}`);
+			log.warn(`No book found with ISBN: ${isbn}`, { isbn });
 		}
 	});
 
 	const books = await Promise.all(promisedBooks);
 	const count = books.filter((book) => book).length;
 
-	console.log(`Downloaded ${count} new books.`);
+	log.info(`Downloaded ${count} new books.`, { count });
 };
 
 let isRunning = false;
@@ -90,7 +98,7 @@ const runService = async () => {
 			}
 		}
 	} catch (error) {
-		console.error("An error occurred:", error);
+		log.error("Sync run failed", { error });
 	} finally {
 		isRunning = false;
 	}
@@ -100,11 +108,11 @@ runService();
 setInterval(runService, 30000);
 
 process.on("SIGINT", () => {
-	console.log("Exiting...");
+	log.info("Exiting...");
 	process.exit(0);
 });
 
 process.on("unhandledRejection", (error) => {
-	console.error("An unhandled rejection occurred:", error);
+	log.error("An unhandled rejection occurred", { error });
 	process.exit(1);
 });

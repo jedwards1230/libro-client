@@ -104,6 +104,16 @@ To alert on a stalled sync, use the age of the last success. It reads as a huge 
 time() - libro_last_successful_sync_timestamp_seconds
 ```
 
+### Logging
+
+The service writes one JSON object per line to stdout, so each event is a single log entry:
+
+```json
+{"ts":"2026-10-23T21:06:00.123Z","level":"error","logger":"service","msg":"Scan failed: Not logged in","error":"Not logged in","stack":"Error: Not logged in\n    at getLibrary (...)"}
+```
+
+`ts` is RFC3339, `level` is one of `error`, `warn`, `info`, `debug`, `logger` is a stable scope (`service`, `metrics`, `LibroFmClient`, ...), and `msg` is the message. Errors also carry `error` (the message) and `stack` (the whole stack as one string). The interactive CLI keeps its human-readable output, and the files in `data/logs/` use the same JSON lines.
+
 ## Configuration
 
 You can set the following environment variables:

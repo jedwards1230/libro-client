@@ -27,6 +27,7 @@ src/
     Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/)
     DownloadClient.ts — File download + zip extraction
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
+    LogFormat.ts    — One-JSON-line log formatting (pure; used by Logger.ts and the service)
     Logger.ts       — Winston logger + @LogMethod decorator
     Metrics.ts      — Hand-rolled Prometheus registry + /metrics server (no dependencies)
     State.ts        — Local book state (data/config/state.json)
@@ -93,3 +94,9 @@ Credentials are persisted to `data/config/config.json` after first successful lo
 These names are a contract with the alert rules that consume them; do not rename them. Event-to-series logic lives in `createLibroMetrics()` (`recordScanSuccess`, `recordScanError`, `recordDownload`, `recordDownloadError`) so it is tested without importing `service.ts`, which starts the loop on import.
 
 Known limitation: "successful" means `getNewBooks()` did not throw. `LibroFmClient.getLibrary()` swallows library-fetch errors (it clears the auth token and returns an empty library), so the first scan after such a failure counts as a success; the scans after it throw `Not logged in` and count as errors.
+
+## Logging
+
+The service logs one JSON object per line on stdout (`useJsonConsole()` + `createJsonLog()`; `src/lib/LogFormat.ts`). Fields follow the Grafana Alloy `json_processor` the log shipper uses: `ts` (RFC3339), `level` (becomes a Loki label), `logger` (stable scope, also a label), `msg`. Errors add `error` (message) and `stack` (one string). Alloy stores only `msg` in Loki, so `msg` includes the error text (`Scan failed: Not logged in`); the full `error`/`stack` fields are in the raw line (`kubectl logs`).
+
+The CLI stays human-readable: `Logger.ts` switches the console to JSON only when `useJsonConsole()` is called (the service does; `cli.ts` does not), because TTY detection would wrap piped output such as `libro check --json | jq`. The `data/logs/*.log` files are JSON lines for both. Do not use `console.*` in the service or `Metrics.ts`: Bun prints a source excerpt for `console.error(error)`, which splits one event over many lines.

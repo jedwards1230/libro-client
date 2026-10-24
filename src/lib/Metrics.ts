@@ -6,9 +6,12 @@
  * Output is deterministic: families are sorted by name and series by their
  * rendered label set.
  *
- * Logging uses `console.*` (like `service.ts`) rather than the winston logger,
- * which prunes the logs directory at import time.
+ * Logs through `createJsonLog` rather than the winston logger, which prunes
+ * the logs directory at import time.
  */
+import { createJsonLog } from "./LogFormat";
+
+const log = createJsonLog("metrics");
 
 // The slice of `Bun.serve` used here. tsconfig does not load Bun's global
 // types, and importing them (`from "bun"`) would surface unrelated latent
@@ -268,9 +271,7 @@ export function resolveMetricsPort(
 	if (raw === undefined || raw === "") return DEFAULT_METRICS_PORT;
 	const port = Number(raw);
 	if (!Number.isInteger(port) || port < 1 || port > 65535) {
-		console.warn(
-			`Invalid METRICS_PORT "${raw}"; using ${DEFAULT_METRICS_PORT}`
-		);
+		log.warn(`Invalid METRICS_PORT "${raw}"; using ${DEFAULT_METRICS_PORT}`);
 		return DEFAULT_METRICS_PORT;
 	}
 	return port;
@@ -314,21 +315,21 @@ export function startMetricsServer(
 						headers: { "Content-Type": METRICS_CONTENT_TYPE },
 					});
 				} catch (error) {
-					console.error("Failed to render metrics:", error);
+					log.error("Failed to render metrics", { error });
 					return new Response("Internal Server Error\n", {
 						status: 500,
 					});
 				}
 			},
 		});
-		console.log(
-			`Metrics available on http://${hostname}:${server.port}/metrics`
-		);
+		log.info(`Metrics available on http://${hostname}:${server.port}/metrics`, {
+			port: server.port,
+		});
 		return server;
 	} catch (error) {
-		console.warn(
-			`Could not start metrics server on ${hostname}:${port}; continuing without it:`,
-			error
+		log.warn(
+			`Could not start metrics server on ${hostname}:${port}; continuing without it`,
+			{ error, port }
 		);
 		return undefined;
 	}
