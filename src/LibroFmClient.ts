@@ -3,6 +3,7 @@ import InputHandler from "@/lib/InputHandler";
 import APIHandler from "@/APIHandler";
 import logger, { LogMethod } from "@/lib/Logger";
 import Config from "@/lib/Config";
+import { metrics } from "@/lib/Metrics";
 import State from "@/lib/State";
 import { DOWNLOAD_DIR } from "@/lib/Directories";
 
@@ -77,6 +78,7 @@ export default class LibroFmClient {
 				}
 				page += 1;
 			} catch (error: any) {
+				metrics.recordLibraryFetchError();
 				logger.error(`Failed to fetch library: ${error.message}`, {
 					fn: "LibroFmClient.getLibrary",
 				});

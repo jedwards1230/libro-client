@@ -18,7 +18,7 @@ bun run service.ts
 
 ```
 cli.ts              — CLI entry point (yargs commands: list, get, check)
-service.ts          — Long-running service (polls for new books every 30s)
+service.ts          — Long-running service (polls for new books every 30s, serves /metrics)
 src/
   LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks
   APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
@@ -27,7 +27,9 @@ src/
     Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/)
     DownloadClient.ts — File download + zip extraction
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
+    LogFormat.ts    — One-JSON-line log formatting (pure; used by Logger.ts and the service)
     Logger.ts       — Winston logger + @LogMethod decorator
+    Metrics.ts      — Hand-rolled Prometheus registry + /metrics server (no dependencies)
     State.ts        — Local book state (data/config/state.json)
   types.d.ts        — Global TypeScript types (Audiobook, AudiobookMap, etc.)
 ```
@@ -71,6 +73,29 @@ reference is [burntcookie90/librofm-downloader](https://github.com/burntcookie90
 |----------|----------|-------------|
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
+| `METRICS_PORT` | No | Port for the service's Prometheus `/metrics` endpoint (default `9464`; invalid values warn and fall back) |
 
 Credentials are persisted to `data/config/config.json` after first successful login. Auth tokens are also cached there.
 
+## Metrics
+
+`service.ts` starts `startMetricsServer()` (`src/lib/Metrics.ts`) before anything else: `GET /metrics` on `0.0.0.0:${METRICS_PORT ?? 9464}`, Prometheus text format 0.0.4, no dependencies. `404` for other paths, `405` for non-GET. If the port is taken it logs a warning and the sync loop carries on. The endpoint is **unauthenticated and cluster-internal**; never expose it publicly.
+
+| Metric | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `libro_last_successful_sync_timestamp_seconds` | gauge | none | Unix time a scan last completed with no error: `client.getNewBooks()` returned and no library fetch error was swallowed during it. With or without new books. `0` until the first success |
+| `libro_last_scan_timestamp_seconds` | gauge | none | Unix time the last scan attempt finished, success or not. `0` until the first scan finishes |
+| `libro_scans_total` | counter | `result`: `success`, `error` | Scans finished (both series start at 0) |
+| `libro_books_downloaded_total` | counter | none | Books actually downloaded |
+| `libro_errors_total` | counter | `stage`: `scan`, `download` | Errors by stage (both series start at 0) |
+| `libro_library_fetch_errors_total` | counter | none | Library fetch errors swallowed by `LibroFmClient.getLibrary()` |
+
+These names are a contract with the alert rules that consume them; do not rename them. Event-to-series logic lives in `createLibroMetrics()` (`trackScan`, `recordLibraryFetchError`, `recordDownload`, `recordDownloadError`) so it is tested without importing `service.ts`, which starts the loop on import.
+
+`LibroFmClient.getLibrary()` swallows a library-fetch error: it clears the auth token and returns an empty library instead of throwing, and nothing logs in again until the process restarts. It records `libro_library_fetch_errors_total`, and `service.ts` runs each scan through `metrics.trackScan()`, which counts the scan as an error if it threw **or** if a fetch error was swallowed during it. So the last-success gauge only advances on a real sync. Alert on `time() - libro_last_successful_sync_timestamp_seconds` together with the error counters. Behaviour of `getLibrary()` itself is unchanged.
+
+## Logging
+
+The service logs one JSON object per line on stdout (`useJsonConsole()` + `createJsonLog()`; `src/lib/LogFormat.ts`). Fields suit the log shipper (Grafana Alloy): `ts` (RFC3339), `level` and `logger` (a stable scope), which become labels, and `msg`. Errors add `error` (message) and `stack` (one string). The shipper stores only `msg`, so `msg` includes the error text (`Sync run failed: Not logged in`); the full `error`/`stack` fields are in the raw stdout line.
+
+The CLI stays human-readable: `Logger.ts` switches the console to JSON only when `useJsonConsole()` is called (the service does; `cli.ts` does not), because TTY detection would wrap piped output such as `libro check --json | jq`. The `data/logs/*.log` files are JSON lines for both. Do not use `console.*` in the service or `Metrics.ts`: Bun prints a source excerpt for `console.error(error)`, which splits one event over many lines.

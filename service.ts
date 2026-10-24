@@ -1,42 +1,49 @@
 import LibroFmClient from "@/LibroFmClient";
+import { createJsonLog } from "@/lib/LogFormat";
+import { useJsonConsole } from "@/lib/Logger";
+import { metrics, startMetricsServer } from "@/lib/Metrics";
+
+// Daemon output is one JSON object per line for the log shipper.
+useJsonConsole();
+const log = createJsonLog("service");
+
+startMetricsServer();
 
 const client = new LibroFmClient();
 await client.init();
 
 const scanLibrary = async () => {
-	console.log("Checking for new books...");
-	try {
-		const newBooks = await client.getNewBooks();
+	log.info("Checking for new books...");
+	// A failure is logged once, by runService, which carries the error and stack.
+	const newBooks = await metrics.trackScan(() => client.getNewBooks());
 
-		if (newBooks.length > 0) {
-			console.log(`Found ${newBooks.length} new books:`);
-			newBooks.forEach((book, idx) => {
-				console.log(`${idx + 1}. ${book.title}`);
-			});
-		} else {
-			console.log("No new books found.");
-		}
-
-		return newBooks;
-	} catch (error) {
-		console.error("An error occurred:", error);
-		throw error;
+	if (newBooks.length > 0) {
+		log.info(`Found ${newBooks.length} new books`, {
+			count: newBooks.length,
+		});
+		newBooks.forEach((book) => {
+			log.info(`New book: ${book.title}`, { isbn: book.isbn });
+		});
+	} else {
+		log.info("No new books found.");
 	}
+
+	return newBooks;
 };
 
 let overwrite = false;
 let keepZip = false;
 const downloadBooks = async (newBooks: Audiobook[]) => {
 	const isbns = newBooks.map((book) => book.isbn);
-	console.log("Downloading new books...");
+	log.info("Downloading new books...");
 
 	const audiobookLibrary = await client.getLibrary();
 
 	const promisedBooks = isbns.map(async (isbn) => {
-		console.log(`Searching library for ISBN: ${isbn}`);
+		log.info(`Searching library for ISBN: ${isbn}`, { isbn });
 		const book = audiobookLibrary[isbn];
 		if (book) {
-			console.log(`Downloading: ${book.title}`);
+			log.info(`Downloading: ${book.title}`, { isbn });
 			try {
 				const filepath = await client.downloadBook(
 					book,
@@ -44,23 +51,25 @@ const downloadBooks = async (newBooks: Audiobook[]) => {
 					keepZip
 				);
 				if (filepath) {
-					console.log(`Downloaded ${book.title}`);
+					log.info(`Downloaded ${book.title}`, { isbn });
+					metrics.recordDownload();
 					return book;
 				} else {
-					console.log("No new books downloaded");
+					log.info("No new books downloaded", { isbn });
 				}
 			} catch (error) {
-				console.error("An error occurred:", error);
+				metrics.recordDownloadError();
+				log.error("Download failed", { error, isbn });
 			}
 		} else {
-			console.warn(`No book found with ISBN: ${isbn}`);
+			log.warn(`No book found with ISBN: ${isbn}`, { isbn });
 		}
 	});
 
 	const books = await Promise.all(promisedBooks);
 	const count = books.filter((book) => book).length;
 
-	console.log(`Downloaded ${count} new books.`);
+	log.info(`Downloaded ${count} new books.`, { count });
 };
 
 let isRunning = false;
@@ -74,9 +83,16 @@ const runService = async () => {
 
 	try {
 		const newBooks = await scanLibrary();
-		if (newBooks.length > 0) await downloadBooks(newBooks);
+		if (newBooks.length > 0) {
+			try {
+				await downloadBooks(newBooks);
+			} catch (error) {
+				metrics.recordDownloadError();
+				throw error;
+			}
+		}
 	} catch (error) {
-		console.error("An error occurred:", error);
+		log.error("Sync run failed", { error });
 	} finally {
 		isRunning = false;
 	}
@@ -86,11 +102,11 @@ runService();
 setInterval(runService, 30000);
 
 process.on("SIGINT", () => {
-	console.log("Exiting...");
+	log.info("Exiting...");
 	process.exit(0);
 });
 
 process.on("unhandledRejection", (error) => {
-	console.error("An unhandled rejection occurred:", error);
+	log.error("An unhandled rejection occurred", { error });
 	process.exit(1);
 });

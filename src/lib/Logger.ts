@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 
 import { LOGS_DIR } from "./Directories";
+import { jsonLogFormat } from "./LogFormat";
 
 if (fs.existsSync(LOGS_DIR)) {
 	fs.readdirSync(LOGS_DIR).forEach((file) => {
@@ -15,9 +16,10 @@ const debugLogFile = path.join(LOGS_DIR, "debug.log");
 
 const DEBUG_MODE = process.env.DEBUG === "true";
 
-function getFormat(fileTransport: boolean = false) {
+/** Human-readable console format, used by the interactive CLI. */
+function getPrettyFormat() {
 	return format.printf(({ timestamp, level, message, fn, ...rest }) => {
-		if (!DEBUG_MODE && !fileTransport && level.includes("info")) {
+		if (!DEBUG_MODE && level.includes("info")) {
 			return message;
 		}
 
@@ -29,9 +31,11 @@ function getFormat(fileTransport: boolean = false) {
 
 		if (typeof message === "object") {
 			const fnStr = message.fn ? ` ${message.fn}` : "";
-			delete message.fn;
 			msg = `${timeStr}(${level})${fnStr}`;
+			// Skip `fn` rather than deleting it: `message` is shared with the
+			// other transports, which still need it.
 			for (const key in message) {
+				if (key === "fn") continue;
 				msg += `\n${key}: ${JSON.stringify(message[key], null, 2)}`;
 			}
 		} else if (message) {
@@ -51,35 +55,45 @@ function getFormat(fileTransport: boolean = false) {
 	});
 }
 
+/** One JSON line per event; used for the log files and the service console. */
+const jsonFormat = format.combine(
+	format.errors({ stack: true }),
+	format.splat(),
+	format.timestamp(),
+	jsonLogFormat
+);
+
+const consoleTransport = new transports.Console({
+	format: format.combine(
+		format.errors({ stack: true }),
+		format.splat(),
+		format.colorize(),
+		getPrettyFormat()
+	),
+});
+
+/**
+ * Switch the console to one JSON object per line. The long-running service
+ * calls this; the interactive CLI keeps the human-readable default. (Keying
+ * this on `stdout.isTTY` would be wrong: `libro check --json | jq` is piped
+ * but must not have its output wrapped in log JSON.)
+ */
+export function useJsonConsole() {
+	consoleTransport.format = jsonFormat;
+}
+
 const logger = createLogger({
 	level: DEBUG_MODE ? "debug" : "info",
 
 	transports: [
-		new transports.Console({
-			format: format.combine(
-				format.errors({ stack: true }),
-				format.splat(),
-				format.colorize(),
-				getFormat()
-			),
-		}),
+		consoleTransport,
 		new transports.File({
-			format: format.combine(
-				format.errors({ stack: true }),
-				format.splat(),
-				format.timestamp(),
-				getFormat(true)
-			),
+			format: jsonFormat,
 			filename: sillyLogFile,
 			level: "silly",
 		}),
 		new transports.File({
-			format: format.combine(
-				format.errors({ stack: true }),
-				format.splat(),
-				format.timestamp(),
-				getFormat(true)
-			),
+			format: jsonFormat,
 			filename: debugLogFile,
 			level: "debug",
 		}),

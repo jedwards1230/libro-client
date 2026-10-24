@@ -10,4 +10,7 @@ FROM base AS release
 COPY --from=install /temp/dev/node_modules ./node_modules
 COPY . .
 
+# Prometheus metrics (METRICS_PORT)
+EXPOSE 9464
+
 ENTRYPOINT [ "bun", "run", "service.ts" ]
