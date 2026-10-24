@@ -91,17 +91,20 @@ The endpoint is **unauthenticated** and meant to be reached only from inside the
 
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|
-| `libro_last_successful_sync_timestamp_seconds` | gauge | none | Unix time a full library scan last completed without throwing, whether or not it found new books. `0` until the first success. |
+| `libro_last_successful_sync_timestamp_seconds` | gauge | none | Unix time a full library scan last completed with no error, whether or not it found new books. A scan that throws, or whose library fetch failed, does not count. `0` until the first success. |
 | `libro_last_scan_timestamp_seconds` | gauge | none | Unix time the last scan attempt finished, successful or not. `0` until the first scan finishes. |
 | `libro_scans_total` | counter | `result` = `success` or `error` | Scans finished, by result. |
 | `libro_books_downloaded_total` | counter | none | Books downloaded. |
 | `libro_errors_total` | counter | `stage` = `scan` or `download` | Errors, by stage. |
+| `libro_library_fetch_errors_total` | counter | none | Library fetch errors. The client swallows these (it clears its auth token and returns an empty library instead of throwing), so each one also makes that scan count as an error. |
 
-To alert on a stalled sync, use the age of the last success. It reads as a huge number (the current Unix time) if a sync has never succeeded since the process started:
+To alert on a stalled sync, use the age of the last success. It reads as a huge number (the current Unix time) if a sync has not succeeded since the process started:
 
 ```promql
 time() - libro_last_successful_sync_timestamp_seconds
 ```
+
+Pair it with the error counters (`libro_scans_total{result="error"}`, `libro_errors_total`, `libro_library_fetch_errors_total`) to see failures as they happen rather than once the age threshold is crossed.
 
 ### Logging
 

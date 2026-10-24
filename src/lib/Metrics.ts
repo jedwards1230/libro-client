@@ -202,7 +202,7 @@ export function createLibroMetrics(options: LibroMetricsOptions = {}) {
 
 	const lastSuccessfulSync = registry.gauge(
 		"libro_last_successful_sync_timestamp_seconds",
-		"Unix time a full library scan last completed without throwing, whether or not it found new books. 0 until the first success."
+		"Unix time a full library scan last completed with no error, whether or not it found new books. 0 until the first success."
 	);
 	const lastScan = registry.gauge(
 		"libro_last_scan_timestamp_seconds",
@@ -222,24 +222,57 @@ export function createLibroMetrics(options: LibroMetricsOptions = {}) {
 		"Errors, by stage (scan or download).",
 		["stage"]
 	);
+	const libraryFetchErrors = registry.counter(
+		"libro_library_fetch_errors_total",
+		"Library fetch errors that getLibrary() swallowed: it clears the auth token and returns an empty library instead of throwing."
+	);
 
 	scans.init({ result: "success" }).init({ result: "error" });
 	errors.init({ stage: "scan" }).init({ stage: "download" });
 
+	function recordScanSuccess() {
+		const t = now();
+		scans.inc({ result: "success" });
+		lastScan.set(t);
+		lastSuccessfulSync.set(t);
+	}
+
+	function recordScanError() {
+		scans.inc({ result: "error" });
+		errors.inc({ stage: "scan" });
+		lastScan.set(now());
+	}
+
 	return {
 		registry,
 
-		recordScanSuccess() {
-			const t = now();
-			scans.inc({ result: "success" });
-			lastScan.set(t);
-			lastSuccessfulSync.set(t);
+		recordScanSuccess,
+		recordScanError,
+
+		/** `getLibrary()` hit a fetch error and swallowed it. */
+		recordLibraryFetchError() {
+			libraryFetchErrors.inc();
 		},
 
-		recordScanError() {
-			scans.inc({ result: "error" });
-			errors.inc({ stage: "scan" });
-			lastScan.set(now());
+		/**
+		 * Run one scan and record its outcome. It is an error if `scan` throws,
+		 * and also if a library-fetch error was swallowed while it ran: the
+		 * scan then returns normally, but with an empty or partial library.
+		 * Scans never overlap (the service has an `isRunning` guard), so
+		 * comparing the counter before and after attributes errors correctly.
+		 */
+		async trackScan<T>(scan: () => Promise<T>): Promise<T> {
+			const before = libraryFetchErrors.get() ?? 0;
+			let result: T;
+			try {
+				result = await scan();
+			} catch (error) {
+				recordScanError();
+				throw error;
+			}
+			if ((libraryFetchErrors.get() ?? 0) > before) recordScanError();
+			else recordScanSuccess();
+			return result;
 		},
 
 		recordDownload() {

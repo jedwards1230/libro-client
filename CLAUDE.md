@@ -83,15 +83,16 @@ Credentials are persisted to `data/config/config.json` after first successful lo
 
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|
-| `libro_last_successful_sync_timestamp_seconds` | gauge | none | Unix time `client.getNewBooks()` last returned without throwing, with or without new books. `0` until the first success |
+| `libro_last_successful_sync_timestamp_seconds` | gauge | none | Unix time a scan last completed with no error: `client.getNewBooks()` returned and no library fetch error was swallowed during it. With or without new books. `0` until the first success |
 | `libro_last_scan_timestamp_seconds` | gauge | none | Unix time the last scan attempt finished, success or not. `0` until the first scan finishes |
 | `libro_scans_total` | counter | `result`: `success`, `error` | Scans finished (both series start at 0) |
 | `libro_books_downloaded_total` | counter | none | Books actually downloaded |
 | `libro_errors_total` | counter | `stage`: `scan`, `download` | Errors by stage (both series start at 0) |
+| `libro_library_fetch_errors_total` | counter | none | Library fetch errors swallowed by `LibroFmClient.getLibrary()` |
 
-These names are a contract with the alert rules that consume them; do not rename them. Event-to-series logic lives in `createLibroMetrics()` (`recordScanSuccess`, `recordScanError`, `recordDownload`, `recordDownloadError`) so it is tested without importing `service.ts`, which starts the loop on import.
+These names are a contract with the alert rules that consume them; do not rename them. Event-to-series logic lives in `createLibroMetrics()` (`trackScan`, `recordLibraryFetchError`, `recordDownload`, `recordDownloadError`) so it is tested without importing `service.ts`, which starts the loop on import.
 
-Known limitation: "successful" means `getNewBooks()` did not throw. `LibroFmClient.getLibrary()` swallows library-fetch errors (it clears the auth token and returns an empty library), so the first scan after such a failure counts as a success; the scans after it throw `Not logged in` and count as errors.
+`LibroFmClient.getLibrary()` swallows a library-fetch error: it clears the auth token and returns an empty library instead of throwing, and nothing logs in again until the process restarts. It records `libro_library_fetch_errors_total`, and `service.ts` runs each scan through `metrics.trackScan()`, which counts the scan as an error if it threw **or** if a fetch error was swallowed during it. So the last-success gauge only advances on a real sync. Alert on `time() - libro_last_successful_sync_timestamp_seconds` together with the error counters. Behaviour of `getLibrary()` itself is unchanged.
 
 ## Logging
 

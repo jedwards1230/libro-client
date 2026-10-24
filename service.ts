@@ -15,8 +15,7 @@ await client.init();
 const scanLibrary = async () => {
 	log.info("Checking for new books...");
 	try {
-		const newBooks = await client.getNewBooks();
-		metrics.recordScanSuccess();
+		const newBooks = await metrics.trackScan(() => client.getNewBooks());
 
 		if (newBooks.length > 0) {
 			log.info(`Found ${newBooks.length} new books`, {
@@ -31,7 +30,6 @@ const scanLibrary = async () => {
 
 		return newBooks;
 	} catch (error) {
-		metrics.recordScanError();
 		log.error("Scan failed", { error });
 		throw error;
 	}

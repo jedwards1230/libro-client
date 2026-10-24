@@ -279,6 +279,86 @@ describe("Metrics", () => {
 			expect(sample(out(), "libro_last_successful_sync_timestamp_seconds")).toBe(1_700_000_060);
 		});
 
+		test("the library-fetch-error counter exists at 0 from start", () => {
+			const text = setup().out();
+			expect(sample(text, "libro_library_fetch_errors_total")).toBe(0);
+			expect(text).toContain("# TYPE libro_library_fetch_errors_total counter");
+		});
+
+		describe("trackScan", () => {
+			test("a clean scan is a success: gauge advances, value is passed through", async () => {
+				const { m, out } = setup();
+				const books = [{ isbn: "1" }];
+				expect(await m.trackScan(async () => books)).toBe(books);
+				const text = out();
+				expect(sample(text, "libro_last_successful_sync_timestamp_seconds")).toBe(1_700_000_000);
+				expect(sample(text, 'libro_scans_total{result="success"}')).toBe(1);
+				expect(sample(text, 'libro_scans_total{result="error"}')).toBe(0);
+				expect(sample(text, 'libro_errors_total{stage="scan"}')).toBe(0);
+			});
+
+			test("a swallowed library-fetch error is a failed scan, and the gauge does not move", async () => {
+				const { m, out } = setup();
+				// What getLibrary() does on a fetch error: record it, then return normally.
+				const result = await m.trackScan(async () => {
+					m.recordLibraryFetchError();
+					return [] as unknown[];
+				});
+				expect(result).toEqual([]); // the scan's return value is untouched
+				const text = out();
+				expect(sample(text, "libro_last_successful_sync_timestamp_seconds")).toBe(0);
+				expect(sample(text, "libro_last_scan_timestamp_seconds")).toBe(1_700_000_000);
+				expect(sample(text, 'libro_scans_total{result="error"}')).toBe(1);
+				expect(sample(text, 'libro_scans_total{result="success"}')).toBe(0);
+				expect(sample(text, 'libro_errors_total{stage="scan"}')).toBe(1);
+				expect(sample(text, "libro_library_fetch_errors_total")).toBe(1);
+			});
+
+			test("a throwing scan is a failed scan and the error is rethrown unchanged", async () => {
+				const { m, out } = setup();
+				const boom = new Error("Not logged in");
+				await expect(m.trackScan(async () => { throw boom; })).rejects.toBe(boom);
+				const text = out();
+				expect(sample(text, "libro_last_successful_sync_timestamp_seconds")).toBe(0);
+				expect(sample(text, 'libro_scans_total{result="error"}')).toBe(1);
+				expect(sample(text, 'libro_errors_total{stage="scan"}')).toBe(1);
+				// Only a swallowed fetch error moves the fetch-error counter.
+				expect(sample(text, "libro_library_fetch_errors_total")).toBe(0);
+			});
+
+			test("several swallowed errors in one scan are still one failed scan", async () => {
+				const { m, out } = setup();
+				await m.trackScan(async () => {
+					m.recordLibraryFetchError();
+					m.recordLibraryFetchError();
+				});
+				const text = out();
+				expect(sample(text, 'libro_scans_total{result="error"}')).toBe(1);
+				expect(sample(text, "libro_library_fetch_errors_total")).toBe(2);
+			});
+
+			test("a fetch error outside a scan does not fail the next clean scan", async () => {
+				const { m, out } = setup();
+				m.recordLibraryFetchError(); // e.g. from the download stage
+				await m.trackScan(async () => []);
+				const text = out();
+				expect(sample(text, 'libro_scans_total{result="success"}')).toBe(1);
+				expect(sample(text, 'libro_scans_total{result="error"}')).toBe(0);
+				expect(sample(text, "libro_last_successful_sync_timestamp_seconds")).toBe(1_700_000_000);
+			});
+
+			test("a clean scan after a failed one advances the gauge again", async () => {
+				const { m, advance, out } = setup();
+				await m.trackScan(async () => m.recordLibraryFetchError());
+				advance(30);
+				await m.trackScan(async () => []);
+				const text = out();
+				expect(sample(text, "libro_last_successful_sync_timestamp_seconds")).toBe(1_700_000_030);
+				expect(sample(text, 'libro_scans_total{result="error"}')).toBe(1);
+				expect(sample(text, 'libro_scans_total{result="success"}')).toBe(1);
+			});
+		});
+
 		test("download events move only the download series", () => {
 			const { m, out } = setup();
 			m.recordDownload();
