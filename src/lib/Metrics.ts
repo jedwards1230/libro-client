@@ -187,8 +187,6 @@ export class Registry {
 
 export interface LibroMetricsOptions {
 	registry?: Registry;
-	/** Reported in `libro_info`. Defaults to `LIBRO_VERSION`, else "unknown". */
-	version?: string;
 	/** Unix time in seconds; injectable for tests. */
 	now?: () => number;
 }
@@ -201,7 +199,6 @@ export interface LibroMetricsOptions {
 export function createLibroMetrics(options: LibroMetricsOptions = {}) {
 	const registry = options.registry ?? new Registry();
 	const now = options.now ?? (() => Date.now() / 1000);
-	const version = options.version ?? (process.env.LIBRO_VERSION || "unknown");
 
 	const lastSuccessfulSync = registry.gauge(
 		"libro_last_successful_sync_timestamp_seconds",
@@ -225,15 +222,9 @@ export function createLibroMetrics(options: LibroMetricsOptions = {}) {
 		"Errors, by stage (scan or download).",
 		["stage"]
 	);
-	const info = registry.gauge(
-		"libro_info",
-		"Build information; always 1.",
-		["version"]
-	);
 
 	scans.init({ result: "success" }).init({ result: "error" });
 	errors.init({ stage: "scan" }).init({ stage: "download" });
-	info.set(1, { version });
 
 	return {
 		registry,

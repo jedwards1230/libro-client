@@ -444,8 +444,6 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          build-args: |
-            LIBRO_VERSION=${{ needs.prepare.outputs.version }}
           tags: |
             jedwards1230/libro:${{ needs.prepare.outputs.version }}
             jedwards1230/libro:latest

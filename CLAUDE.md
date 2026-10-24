@@ -74,7 +74,6 @@ reference is [burntcookie90/librofm-downloader](https://github.com/burntcookie90
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 | `METRICS_PORT` | No | Port for the service's Prometheus `/metrics` endpoint (default `9464`; invalid values warn and fall back) |
-| `LIBRO_VERSION` | No | Reported as the `version` label of `libro_info`. The Docker build sets it from the release version; otherwise `unknown` |
 
 Credentials are persisted to `data/config/config.json` after first successful login. Auth tokens are also cached there.
 
@@ -89,7 +88,6 @@ Credentials are persisted to `data/config/config.json` after first successful lo
 | `libro_scans_total` | counter | `result`: `success`, `error` | Scans finished (both series start at 0) |
 | `libro_books_downloaded_total` | counter | none | Books actually downloaded |
 | `libro_errors_total` | counter | `stage`: `scan`, `download` | Errors by stage (both series start at 0) |
-| `libro_info` | gauge | `version` | Always 1 |
 
 These names are a contract with the alert rules that consume them; do not rename them. Event-to-series logic lives in `createLibroMetrics()` (`recordScanSuccess`, `recordScanError`, `recordDownload`, `recordDownloadError`) so it is tested without importing `service.ts`, which starts the loop on import.
 

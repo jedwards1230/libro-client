@@ -213,7 +213,6 @@ describe("Metrics", () => {
 			let t = 1_700_000_000;
 			const m = createLibroMetrics({
 				registry: new Registry(),
-				version: "1.2.3",
 				now: () => t,
 			});
 			return {
@@ -235,7 +234,6 @@ describe("Metrics", () => {
 			expect(sample(text, "libro_books_downloaded_total")).toBe(0);
 			expect(sample(text, 'libro_errors_total{stage="scan"}')).toBe(0);
 			expect(sample(text, 'libro_errors_total{stage="download"}')).toBe(0);
-			expect(sample(text, 'libro_info{version="1.2.3"}')).toBe(1);
 		});
 
 		test("declares the contract types", () => {
@@ -245,7 +243,6 @@ describe("Metrics", () => {
 			expect(text).toContain("# TYPE libro_scans_total counter");
 			expect(text).toContain("# TYPE libro_books_downloaded_total counter");
 			expect(text).toContain("# TYPE libro_errors_total counter");
-			expect(text).toContain("# TYPE libro_info gauge");
 		});
 
 		test("a successful scan stamps both timestamps, even with no new books", () => {
@@ -292,19 +289,6 @@ describe("Metrics", () => {
 			expect(sample(text, 'libro_errors_total{stage="download"}')).toBe(1);
 			expect(sample(text, 'libro_errors_total{stage="scan"}')).toBe(0);
 			expect(sample(text, "libro_last_scan_timestamp_seconds")).toBe(0);
-		});
-
-		test("version defaults to LIBRO_VERSION, else unknown", () => {
-			const prev = process.env.LIBRO_VERSION;
-			try {
-				process.env.LIBRO_VERSION = "9.9.9";
-				expect(createLibroMetrics().registry.render()).toContain('libro_info{version="9.9.9"} 1');
-				delete process.env.LIBRO_VERSION;
-				expect(createLibroMetrics().registry.render()).toContain('libro_info{version="unknown"} 1');
-			} finally {
-				if (prev === undefined) delete process.env.LIBRO_VERSION;
-				else process.env.LIBRO_VERSION = prev;
-			}
 		});
 	});
 
@@ -365,7 +349,7 @@ describe("Metrics", () => {
 		});
 
 		test("serves the libro series from a fresh shared-style registry", async () => {
-			const m = createLibroMetrics({ registry: new Registry(), version: "t" });
+			const m = createLibroMetrics({ registry: new Registry() });
 			m.recordScanError();
 			const server = start(m.registry)!;
 

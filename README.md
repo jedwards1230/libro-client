@@ -96,7 +96,6 @@ The endpoint is **unauthenticated** and meant to be reached only from inside the
 | `libro_scans_total` | counter | `result` = `success` or `error` | Scans finished, by result. |
 | `libro_books_downloaded_total` | counter | none | Books downloaded. |
 | `libro_errors_total` | counter | `stage` = `scan` or `download` | Errors, by stage. |
-| `libro_info` | gauge | `version` | Always `1`; `version` comes from `LIBRO_VERSION` (set by the Docker image build, otherwise `unknown`). |
 
 To alert on a stalled sync, use the age of the last success. It reads as a huge number (the current Unix time) if a sync has never succeeded since the process started:
 
